@@ -127,7 +127,7 @@ async def supervise(args):
         await asyncio.sleep(args.retry)
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--hub", default="127.0.0.1:8790")
     ap.add_argument("--name", default="Claude")
@@ -137,7 +137,7 @@ def main():
                     help="seconds to keep one passkey on screen while you enter it")
     ap.add_argument("--retry", type=float, default=5.0)
     ap.add_argument("--console", action="store_true")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     args.host, _, port = args.hub.partition(":")
     args.port = int(port or 8790)
 

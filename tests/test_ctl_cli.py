@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 
 import pytest
 
@@ -31,3 +33,15 @@ def test_status_runs(tmp_path, monkeypatch, capsys):
     ctl.main(["status"])
     out = capsys.readouterr().out
     assert "buddyhub" in out and "buddy-relay" in out and "client hooks" in out
+
+
+def test_relay_main_accepts_argv():
+    from buddybridge import relay
+    with pytest.raises(SystemExit):   # --help exits 0; argv is honored, not sys.argv
+        relay.main(["--help"])
+
+
+def test_ctl_runnable_as_module():
+    out = subprocess.run([sys.executable, "-m", "buddybridge.ctl", "--help"],
+                         capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0 and "client" in out.stdout

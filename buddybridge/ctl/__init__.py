@@ -50,9 +50,9 @@ def _client_uninstall(args):
 # ---- hub ---------------------------------------------------------------- #
 def _hub_install(args):
     exec_cmd = (f'"{_python_for_service()}" -m buddybridge.hub '
-                f'--port {args.port} --transport {args.transport}')
+                f'--port {args.port} --transport {args.transport} --owner {args.owner}')
     services.register("buddyhub", exec_cmd, "Claude Buddy hub")
-    print(f"hub installed (transport={args.transport}, port={args.port}).")
+    print(f"hub installed (transport={args.transport}, port={args.port}, owner={args.owner}).")
 
 
 def _hub_uninstall(args):
@@ -75,8 +75,7 @@ def _relay_uninstall(args):
 def _relay_pair(args):
     """Run the relay in the foreground so you can enter the BLE passkey."""
     from buddybridge import relay
-    sys.argv = ["buddy-relay", "--console", "--hub", args.hub]
-    relay.main()
+    relay.main(["--console", "--hub", args.hub])
 
 
 # ---- status ------------------------------------------------------------- #
@@ -113,6 +112,7 @@ def main(argv=None):
     phi = phs.add_parser("install")
     phi.add_argument("--port", type=int, default=8787)
     phi.add_argument("--transport", default="relay", choices=["relay", "mock"])
+    phi.add_argument("--owner", default="you", help="name shown on the device/dashboard")
     phi.set_defaults(func=_hub_install)
     phs.add_parser("uninstall").set_defaults(func=_hub_uninstall)
 
@@ -130,7 +130,3 @@ def main(argv=None):
 
     args = p.parse_args(argv)
     args.func(args)
-
-
-if __name__ == "__main__":
-    main()
