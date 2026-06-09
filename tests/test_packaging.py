@@ -15,6 +15,12 @@ def test_hub_module_exposes_main():
     assert callable(getattr(hub, "make_handler"))
 
 
+def test_character_assets_packaged():
+    base = files("buddybridge.resources") / "characters" / "tty"
+    assert (base / "manifest.json").is_file()
+    assert (base / "sleep.gif").is_file()
+
+
 def test_runnable_modules_expose_main():
     for name in ("buddybridge.relay", "buddybridge.hook", "buddybridge.launcher"):
         mod = importlib.import_module(name)
