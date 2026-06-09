@@ -24,7 +24,7 @@ buddy = "buddybridge.launcher:main"
 build-tty = "buddybridge.build_tty:main"
 
 [tool.setuptools]
-packages = ["buddybridge", "buddybridge.resources"]
+packages = ["buddybridge", "buddybridge.ctl", "buddybridge.resources"]
 
 [tool.setuptools.package-data]
 "buddybridge.resources" = ["dashboard.html", "characters/tty/*"]
