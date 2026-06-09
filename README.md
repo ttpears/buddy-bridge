@@ -206,8 +206,10 @@ lock 8791; a second copy logs and exits), so it can't pile up. Logs rotate at 51
 1. Claude desktop app → Hardware Buddy → **Forget** (releases its BLE bond; only one
    central can hold the stick).
 2. Wake the stick; confirm Bluetooth on (hold A → settings → bluetooth).
-3. Run the relay; enter the 6-digit passkey the stick shows. `python relay.py --console --no-pair`
-   tries an unencrypted link if bonding is fussy.
+3. Run the relay; enter the 6-digit passkey the stick shows. The relay holds that
+   passkey on screen while it waits for you to bond — **60s** by default
+   (`--pair-timeout`); the same code stays valid the whole time. `python relay.py
+   --console --no-pair` tries an unencrypted link if bonding is fussy.
 
 ---
 

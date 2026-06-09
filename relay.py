@@ -58,7 +58,7 @@ async def _drain(writer):
         pass
 
 
-async def relay_once(host, port, name_prefix, scan_timeout, do_pair):
+async def relay_once(host, port, name_prefix, scan_timeout, do_pair, pair_timeout):
     logging.info("connecting to hub %s:%d", host, port)
     reader, writer = await asyncio.open_connection(host, port)
     logging.info("hub connected; scanning for the stick")
@@ -76,13 +76,28 @@ async def relay_once(host, port, name_prefix, scan_timeout, do_pair):
                     await client.pair()
                 except Exception as e:
                     logging.info("pair() note: %s", e)
-            logging.info("BLE connected; relaying")
+            logging.info("BLE connected")
 
             def on_notify(_s, data: bytearray):
                 writer.write(bytes(data))
                 loop.create_task(_drain(writer))
 
-            await client.start_notify(NUS_TX, on_notify)
+            # The NUS characteristics are encrypted-only: until bonding finishes
+            # (you type the stick's passkey on the desktop) start_notify fails.
+            # Retry on the SAME link so one passkey stays on screen for the whole
+            # window, instead of dropping the link and forcing a fresh code every
+            # reconnect. Succeeds on the first try once already bonded.
+            deadline = loop.time() + pair_timeout
+            while True:
+                try:
+                    await client.start_notify(NUS_TX, on_notify)
+                    break
+                except Exception as e:
+                    if loop.time() >= deadline:
+                        raise
+                    logging.info("waiting for pairing — enter the passkey on the desktop (%s)", e)
+                    await asyncio.sleep(2.0)
+            logging.info("subscribed; relaying")
             mtu = (client.mtu_size - 3) if getattr(client, "mtu_size", 0) else 20
             while True:
                 line = await reader.readline()
@@ -102,7 +117,8 @@ async def relay_once(host, port, name_prefix, scan_timeout, do_pair):
 async def supervise(args):
     while True:
         try:
-            await relay_once(args.host, args.port, args.name, args.scan_timeout, not args.no_pair)
+            await relay_once(args.host, args.port, args.name, args.scan_timeout,
+                             not args.no_pair, args.pair_timeout)
         except Exception as e:
             logging.info("relay error: %s", e)
         await asyncio.sleep(args.retry)
@@ -114,6 +130,8 @@ def main():
     ap.add_argument("--name", default="Claude")
     ap.add_argument("--scan-timeout", type=float, default=15.0)
     ap.add_argument("--no-pair", action="store_true")
+    ap.add_argument("--pair-timeout", type=float, default=60.0,
+                    help="seconds to keep one passkey on screen while you enter it")
     ap.add_argument("--retry", type=float, default=5.0)
     ap.add_argument("--console", action="store_true")
     args = ap.parse_args()
