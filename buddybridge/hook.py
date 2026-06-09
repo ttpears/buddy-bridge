@@ -24,16 +24,30 @@ import socket
 import sys
 import urllib.request
 
-HUB = os.environ.get("BUDDY_HUB", "http://127.0.0.1:8787").rstrip("/")
-MACHINE = os.environ.get("BUDDY_MACHINE") or socket.gethostname().split(".")[0]
+from buddybridge import config as _config
 
 # how long the PreToolUse hook waits for a device decision before falling back
 DECISION_WAIT = int(os.environ.get("BUDDY_DECISION_WAIT", "30"))
 QUICK = 2.0          # connect/read timeout for fire-and-forget events
 
 
+def resolve_hub():
+    """Hub URL: env override > config file > localhost default."""
+    env = os.environ.get("BUDDY_HUB")
+    if env:
+        return env.rstrip("/")
+    return (_config.load_config().get("hub") or "http://127.0.0.1:8787").rstrip("/")
+
+
+def resolve_machine():
+    """Display name: env override > config file > short hostname."""
+    return (os.environ.get("BUDDY_MACHINE")
+            or _config.load_config().get("machine")
+            or socket.gethostname().split(".")[0])
+
+
 def post(path, payload, timeout):
-    req = urllib.request.Request(HUB + path,
+    req = urllib.request.Request(resolve_hub() + path,
                                  data=json.dumps(payload).encode(),
                                  headers={"Content-Type": "application/json"},
                                  method="POST")
@@ -42,14 +56,14 @@ def post(path, payload, timeout):
 
 
 def get(path, timeout):
-    with urllib.request.urlopen(HUB + path, timeout=timeout) as r:
+    with urllib.request.urlopen(resolve_hub() + path, timeout=timeout) as r:
         return json.loads(r.read() or b"{}")
 
 
 def fire(kind, session, msg=None):
     """Best-effort session event; never raises."""
     try:
-        post("/event", {"machine": MACHINE, "session": session,
+        post("/event", {"machine": resolve_machine(), "session": session,
                         "kind": kind, "msg": msg}, QUICK)
     except Exception:
         pass
@@ -129,7 +143,7 @@ def main():
         tool = data.get("tool_name", "?")
         hint = hint_for(tool, data.get("tool_input"))
         try:
-            r = post("/permission", {"machine": MACHINE, "session": session,
+            r = post("/permission", {"machine": resolve_machine(), "session": session,
                                      "tool": tool, "hint": hint}, QUICK)
             pid = r.get("id")
             if not pid:
