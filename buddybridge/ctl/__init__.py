@@ -78,6 +78,18 @@ def _relay_pair(args):
     relay.main(["--console", "--hub", args.hub])
 
 
+# ---- tunnel (reverse, hub side) ----------------------------------------- #
+def _tunnel_install(args):
+    services.register("buddy-tunnel", tunnel.reverse_tunnel_cmd(args.to),
+                      f"Claude Buddy reverse tunnel to {args.to}")
+    print(f"reverse tunnel installed -> {args.to} (exposes this hub on its localhost:8787).")
+
+
+def _tunnel_uninstall(args):
+    services.unregister("buddy-tunnel")
+    print("tunnel removed.")
+
+
 # ---- status ------------------------------------------------------------- #
 def _status(args):
     cfg = config.load_config()
@@ -125,6 +137,13 @@ def main(argv=None):
     prp = prs.add_parser("pair")
     prp.add_argument("--hub", default="127.0.0.1:8790")
     prp.set_defaults(func=_relay_pair)
+
+    pt = sub.add_parser("tunnel", help="reverse SSH tunnel (hub side, e.g. a WSL hub)")
+    pts = pt.add_subparsers(dest="action", required=True)
+    pti = pts.add_parser("install")
+    pti.add_argument("--to", required=True, help="SSH host to expose this hub on")
+    pti.set_defaults(func=_tunnel_install)
+    pts.add_parser("uninstall").set_defaults(func=_tunnel_uninstall)
 
     sub.add_parser("status", help="show what this machine runs").set_defaults(func=_status)
 
