@@ -374,12 +374,10 @@ class RelayTransport:
 # --------------------------------------------------------------------------- #
 # HTTP server                                                                   #
 # --------------------------------------------------------------------------- #
-import os
-_DASH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
+from importlib.resources import files
 try:
-    with open(_DASH, encoding="utf-8") as _f:
-        DASHBOARD_HTML = _f.read()
-except OSError:
+    DASHBOARD_HTML = (files("buddybridge.resources") / "dashboard.html").read_text(encoding="utf-8")
+except (OSError, ModuleNotFoundError):
     DASHBOARD_HTML = "<!doctype html><title>Claude Buddy</title><body>dashboard.html missing</body>"
 
 
