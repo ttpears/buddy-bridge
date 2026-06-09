@@ -1,4 +1,6 @@
 import importlib
+import shutil
+import subprocess
 
 from importlib.resources import files
 
@@ -36,3 +38,15 @@ def test_launcher_sets_control_env(monkeypatch):
     assert captured["env"].get("BUDDY_CONTROL") == "1"
     assert captured["args"][0] == "claude"
     assert captured["args"][-2:] == ["--model", "opus"]
+
+
+def test_entry_point_scripts_resolve():
+    # After `pip install -e .` these console scripts must exist on PATH.
+    for script in ("buddyhub", "buddy-relay", "buddy", "build-tty"):
+        assert shutil.which(script), f"{script} not on PATH (did `pip install -e .` run?)"
+
+
+def test_buddyhub_help_runs():
+    out = subprocess.run(["buddyhub", "--help"], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0
+    assert "--transport" in out.stdout
