@@ -26,12 +26,17 @@ across any number of machines.
   with **Python 3 + `bleak`**.
 - **Python 3** on each machine running Claude Code (the hooks are stdlib-only).
 
-You do **not** need the Claude desktop app running. `relay.py` is its own BLE
-central and pairs with the stick directly. The app matters only if the stick is
-already bonded to it — BLE allows one central at a time, so you **Forget** it
-there once to hand the stick over (see *Pairing the stick*). The one desktop-app
-feature buddy-bridge doesn't replicate is the *wireless* character drop — load
-characters over USB instead (see *The `tty` character*).
+`relay.py` is its own BLE central and connects to the stick directly, so the
+desktop app is not a *dependency*. **But you must make sure the desktop app isn't
+holding the stick:** only one central can connect at a time, and the app's
+Hardware Buddy bridge **auto-reconnects in the background** (per `REFERENCE.md`) —
+so closing its window is not enough. If the stick is bonded to the app, the app's
+service will grab it out from under the relay. **Forget** the device in the app
+(Developer → Hardware Buddy → Forget) — or quit the app entirely — to release the
+stick to the relay. See *Pairing the stick*.
+
+The one desktop-app feature buddy-bridge doesn't replicate is the *wireless*
+character drop — load characters over USB instead (see *The `tty` character*).
 
 ---
 
@@ -275,6 +280,7 @@ python3 path/to/claude-desktop-buddy/tools/flash_character.py characters/tty
 | `remote` silent | Check the tunnel: `systemctl --user status buddy-tunnel.service`; from remote `curl -m5 localhost:8787/state`. |
 | Relay won't connect to hub | Hub up? `curl localhost:8787/state`. From Windows the hub is `127.0.0.1:8790` via WSL2 localhost-forwarding; if WSL switches to **mirrored networking** the address changes. |
 | Stick stuck on `sleep` | Relay not connected / not paired. Check `C:\Users\<you>\buddy\relay.log`; re-pair (Forget in desktop app first). |
+| Relay never finds / connects the stick (scan times out) | The **desktop app's background bridge is holding it** — it auto-reconnects even with its window closed. **Forget** the device in the app (or quit the app), then restart the relay. Only one central can connect at a time. |
 | Firewall / interactive login (`gcloud`, passkey) | The relay's BLE pairing prompt appears on the Windows desktop — must be done in your user session. |
 
 ### Key facts
