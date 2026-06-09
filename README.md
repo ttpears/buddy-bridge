@@ -1,158 +1,111 @@
 # buddy-bridge
 
-Drives an **M5StickC Plus** "Hardware Buddy" from **Claude Code** activity across
-multiple machines — showing busy/idle, surfacing permission prompts, and letting
-you **approve or deny tool calls with the stick's A/B buttons**, including prompts
-raised on a remote box.
+See your Claude **CLI** sessions from every machine on one **M5StickC Plus**
+"Hardware Buddy" — busy/idle, permission prompts, and **approve/deny tool calls
+with the stick's A/B buttons**, including prompts raised on a remote box. A web
+dashboard mirrors everything for machines with no stick.
 
 The firmware and BLE wire protocol come from
-[`anthropics/claude-desktop-buddy`](https://github.com/anthropics/claude-desktop-buddy):
-the Claude **desktop apps** drive a paired device over Bluetooth LE (Nordic UART,
-newline-delimited JSON — see that repo's `REFERENCE.md`). The desktop app only
-feeds the device from itself, though — it can't see the `claude` **CLI**, let alone
-CLI sessions running in WSL or on a remote machine. `buddy-bridge` fills that gap:
-it speaks the *same* BLE protocol, sourced instead from Claude Code hook events
-across any number of machines.
-
-> This is an independent, unofficial project built on the public BLE protocol. It
-> is not affiliated with, endorsed by, or supported by Anthropic.
-
-### What you need
-- An **M5StickC Plus** flashed with the
-  [`claude-desktop-buddy`](https://github.com/anthropics/claude-desktop-buddy)
-  firmware — a one-time flash over USB (PlatformIO; see that repo). buddy-bridge
-  ships no firmware and only talks to a device already running it.
-- A host with a Bluetooth radio to run `relay.py` (here, the Windows laptop),
-  with **Python 3 + `bleak`**.
-- **Python 3** on each machine running Claude Code (the hooks are stdlib-only).
-
-Python deps: `pip install -r requirements.txt` (`bleak` on the relay host;
-`Pillow` only if you rebuild the `tty` character — the hub and hooks need nothing).
-
-`relay.py` is its own BLE central and connects to the stick directly, so the
-desktop app is not a *dependency*. **But you must make sure the desktop app isn't
-holding the stick:** only one central can connect at a time, and the app's
-Hardware Buddy bridge **auto-reconnects in the background** (per `REFERENCE.md`) —
-so closing its window is not enough. If the stick is bonded to the app, the app's
-service will grab it out from under the relay. **Forget** the device in the app
-(Developer → Hardware Buddy → Forget) — or quit the app entirely — to release the
-stick to the relay. See *Pairing the stick*.
-
-The one desktop-app feature buddy-bridge doesn't replicate is the *wireless*
-character drop — load characters over USB instead (see *The `tty` character*).
+[`anthropics/claude-desktop-buddy`](https://github.com/anthropics/claude-desktop-buddy);
+buddy-bridge speaks the same protocol but sourced from Claude Code hook events
+across any number of machines. **Independent, unofficial — not affiliated with,
+endorsed by, or supported by Anthropic.**
 
 ---
 
-## Architecture
+## One mental model: roles
+
+Every machine plays one or more roles; `buddyctl` sets them up:
+
+| Role | What it does | Needs |
+| ---- | ------------ | ----- |
+| **hub** | aggregates sessions from all machines + serves the dashboard | Python 3 |
+| **relay** | drives the stick over Bluetooth | Python 3 + `bleak`, a BT radio |
+| **client** | reports this machine's `claude` CLI sessions to the hub | Python 3 |
+
+One box can be all three. Extra machines are just **clients** pointed at the hub —
+that's the whole multi-machine story.
 
 ```
-  desk (WSL)                                            Windows laptop
-  ┌───────────────────────────┐                        ┌────────────────────────┐
-  │ claude sessions ─ hooks ─┐ │                        │ relay.py (bleak)       │
-  │ remote sessions ─hooks───┼─┼─► buddyhub (systemd)   │   ▲ TCP 127.0.0.1:8790  │
-  │   (via SSH reverse tunnel)│ │   :8787 http API      │   │ (WSL localhost-fwd) │
-  │                           │ │   :8790 relay socket ─┼───┘                     │
-  └───────────────────────────┘ │        │             │        │ BLE (NUS)       │
-                                 └────────┼─────────────┘        ▼                 │
-                                          │              🟧 M5StickC Plus          │
-                                          └──── A/B button presses ◄───────────────┘
+  server A ─┐
+  server B ─┼──HTTP :8787──►  hub  ──BLE──►  🟧 stick
+  server C ─┘                 └─ dashboard :8787 (approve/deny in a browser)
 ```
 
-- **Hub** (`buddyhub.py`) runs in WSL as a systemd service. It aggregates session
-  state from every machine, owns the permission queue, and speaks the Hardware
-  Buddy protocol through a pluggable transport.
-- **BLE radio** lives on the Windows laptop (its Bluetooth; only on when you work).
-  A thin relay (`relay.py`) bridges the hub's TCP socket to the stick's BLE.
-- **Remote machine** `remote` reaches the hub over an **SSH reverse tunnel**, so
-  no inbound ports are exposed.
-
-### Machines
-| Name       | What                  | Reaches hub via            |
-| ---------- | --------------------- | -------------------------- |
-| `desk`     | local WSL (Arch) | `127.0.0.1:8787` directly |
-| `remote`   | `remote.example.com` (Arch), SSH alias `workpc` | reverse tunnel `127.0.0.1:8787` |
+> **Using the Claude desktop app?** Its built-in Hardware Buddy and the bridge's
+> relay both want the stick, and BLE allows only **one** owner — they'll fight over
+> it (the stick visibly flaps between states every ~15s). To let the bridge own it:
+> in the app, **Developer → Hardware Buddy → Forget**, and leave it forgotten
+> (closing the window isn't enough — its bridge auto-reconnects in the background).
+> Without the app running this never comes up.
 
 ---
 
-## Components
+## Install
 
-| File                         | Where it runs | Role |
-| ---------------------------- | ------------- | ---- |
-| `buddyhub.py`                | WSL (hub)     | Brain: HTTP API, session aggregation, permission queue, transports (`mock` / `relay`) |
-| `buddy-hook.py`              | every machine | Claude Code hook agent — reports session events, runs the control round-trip |
-| `install_hooks.py`           | every machine | Idempotently merges buddy hooks into `~/.claude/settings.json` |
-| `relay.py`                   | Windows       | bleak ↔ stick (Nordic UART) ↔ hub TCP; self-supervising, single-instance, rotating log |
-| `manage.ps1`                 | Windows       | relay control: `-Install/-Restart/-Stop/-Status/-Logs/-Uninstall` |
-| `build_tty.py`               | WSL           | Generates the `tty` character pack → `characters/tty/` |
-| `buddy`                      | every machine | `BUDDY_CONTROL=1 claude` launcher (opt-in stick control); symlink onto your PATH |
-| `C:\Users\<you>\buddy\`      | Windows       | `relay.py`, `manage.ps1`, `relay.log` |
+One `pipx` package, one command (`buddyctl`), on every OS. `buddyctl` registers
+background services itself — a **Startup shortcut** on Windows, a `systemd --user`
+unit on Linux/WSL.
 
----
-
-## How it's wired
-
-### Hooks (in each machine's `~/.claude/settings.json`)
-Installed with `install_hooks.py`; loaded by Claude Code **at session start**
-(restart any pre-existing session to pick them up).
-
-| Hook event | Purpose | Timeout |
-| ---------- | ------- | ------- |
-| `SessionStart` / `SessionEnd` | register / drop a session | 5s |
-| `UserPromptSubmit` | session → running; sends your **prompt snippet** to the feed | 5s |
-| `PostToolUse` (matcher `*`) | sends a **tool-action snippet** (`$ cmd`, `Edit file`, …) to the feed | 5s |
-| `Stop` | session → idle | 5s |
-| `PermissionRequest` (matcher `Bash\|Edit\|Write\|NotebookEdit`) | **control path** — fires only on genuine prompts | 60s |
-
-- **Ambient** events fire for *every* session, so the stick always reflects activity.
-- **Control** (`PermissionRequest`) is gated by env **`BUDDY_CONTROL=1`** — only
-  sessions launched via `buddy` route approvals to the stick. Normal `claude`
-  sessions are never intercepted.
-- Chosen over `PreToolUse` deliberately: `PermissionRequest` fires *only when
-  Claude would actually prompt*, so auto-approved tools aren't needlessly routed.
-- **Safety:** if the hub is unreachable or no one answers in 30s, the hook stays
-  silent and Claude Code shows its normal in-terminal prompt. A dead bridge never
-  blocks you.
-
-### Control round-trip (A/B approval)
-```
-claude hits a tool needing approval
-  → PermissionRequest hook POSTs {tool,hint} to hub, then long-polls /decision
-  → hub puts the prompt in the heartbeat → stick: attention + LED
-  → you press A → stick sends {"cmd":"permission","id","once"} → relay → hub
-  → hub resolves the long-poll → hook emits decision.behavior=allow → tool runs
-```
-
----
-
-## Setup
-
-On **each machine** that runs Claude Code:
-
-1. **Install the hooks** into that machine's Claude Code settings (idempotent —
-   preserves any non-buddy hooks; re-run to update):
-   ```bash
-   python3 install_hooks.py ~/.claude/settings.json "$(hostname -s)" \
-       http://127.0.0.1:8787 "$PWD/buddy-hook.py"
-   ```
-   The machine name and hub URL are baked into the installed hook command. On
-   `remote` the hub URL is still `http://127.0.0.1:8787` (the SSH reverse tunnel
-   lands there); pass whatever name you want shown on the device.
-
-2. **Install the `buddy` launcher** (shipped in this repo) onto your PATH so
-   opt-in sessions route approvals to the stick — it just sets `BUDDY_CONTROL=1`
-   before `claude`:
-   ```bash
-   ln -s "$PWD/buddy" ~/.local/bin/buddy
-   ```
-   Plain `claude` stays ambient-only and is never intercepted.
-
-On the **hub machine** (WSL), run the hub:
 ```bash
-python3 buddyhub.py --port 8787 --transport relay --owner you
+pipx install "git+https://github.com/ttpears/buddy-bridge"            # hub + client
+pipx install "buddy-bridge[relay] @ git+https://github.com/ttpears/buddy-bridge"   # + BLE on the relay box
 ```
-Use `--transport mock` to drive it from the keyboard with no hardware at all —
-type `a`/`d` to approve/deny, `s` for state, `q` to quit. For always-on, wire the
-hub into systemd and set up the Windows BLE relay (both under *Operations*).
+
+### Recipe 1 — one machine does everything
+
+On the box with the Bluetooth radio:
+
+```bash
+buddyctl hub   install        # aggregator + dashboard at http://localhost:8787
+buddyctl relay install        # drives the stick (pair once — see below)
+buddyctl client install       # report THIS machine's CLI sessions
+```
+
+Open `http://localhost:8787` for the dashboard. Launch stick-controlled sessions
+with `buddy`; plain `claude` stays ambient-only.
+
+### Recipe 2 — add another server (the fan-in)
+
+On each additional machine:
+
+```bash
+buddyctl client install --hub http://HUBHOST:8787 --name workstation
+```
+
+It appears on the dashboard and stick immediately. `--name` defaults to the
+hostname. Restart any running `claude` session to load the hooks.
+
+### Recipe 3 — tunnels (only if the hub isn't directly reachable)
+
+A tunnel just makes a remote hub look **local** to the client.
+
+- **Forward** (client dials the hub — the usual case):
+  ```bash
+  buddyctl client install --tunnel HUB_SSH_HOST --name workstation
+  ```
+- **Reverse** (the hub is in **WSL** / behind NAT, so it dials out). Run on the hub:
+  ```bash
+  buddyctl tunnel install --to CLIENT_SSH_HOST
+  ```
+  then on the client use `--hub http://127.0.0.1:8787` with no tunnel of its own.
+
+---
+
+## `buddyctl` reference
+
+```
+buddyctl hub     install [--port --transport --owner] | uninstall
+buddyctl relay   install [--hub] | uninstall | pair
+buddyctl client  install [--hub URL] [--name NAME] [--tunnel SSH_HOST] | uninstall | status
+buddyctl tunnel  install --to SSH_HOST | uninstall
+buddyctl status
+```
+
+- `--hub` defaults to `http://127.0.0.1:8787`; `--name` to the hostname. These are
+  saved to a per-machine config (`~/.config/buddybridge/config.json`, or `%APPDATA%`
+  on Windows) that the hook reads — so the same install works on every OS.
+- `install` is idempotent; `uninstall` removes only what buddyctl added.
 
 ---
 
@@ -162,122 +115,19 @@ hub into systemd and set up the Windows BLE relay (both under *Operations*).
 buddy                 # a session whose approvals route to the stick (A/B)
 claude                # normal session — ambient only (busy/idle), no interception
 ```
-On `remote` it's the same `buddy` launcher (its hook injects `BUDDY_MACHINE=remote`
-and the tunneled hub URL).
 
-**Web dashboard:** open `http://<hub-host>:8787/` in any browser for live session
-state and Approve/Deny buttons — the bridge is fully usable on a fleet with no
-hardware at all (the stick is just one optional output).
+`buddy` is a console command installed with the package (it runs `claude` with
+`BUDDY_CONTROL=1`). The **web dashboard** (`http://HUBHOST:8787/`) shows live state
+and Approve/Deny buttons — the bridge is fully usable with no stick at all.
 
 ---
 
-## Operations
+## Pairing the stick (one-time, relay machine)
 
-### Hub + tunnel (WSL, systemd --user, linger enabled)
-```bash
-systemctl --user status  buddyhub.service buddy-tunnel.service
-systemctl --user restart buddyhub.service
-journalctl --user -u buddyhub.service -f
-```
-- `buddyhub.service` → `buddyhub.py --port 8787 --transport relay --owner you`
-  (listens `:8787` HTTP, `:8790` relay).
-- `buddy-tunnel.service` → `ssh -N -R 8787:localhost:8787 workpc`.
-
-Example unit files are in [`systemd/`](systemd/) — copy them to
-`~/.config/systemd/user/`, edit the paths / SSH host, then
-`systemctl --user enable --now buddyhub.service buddy-tunnel.service`. The tunnel
-is only needed for a second machine.
-
-### BLE relay (Windows, Startup shortcut at logon)
-The relay runs as a per-user **Startup shortcut**, not a SYSTEM service — BLE bonds
-are per-user, so it must live in your logged-in session.
-
-**First-time setup:**
-1. Install **Python 3.12** for your user (`manage.ps1` expects it at
-   `%LOCALAPPDATA%\Programs\Python\Python312\`), then `pip install bleak`.
-2. Copy `relay.py` and `manage.ps1` into a folder (e.g. `C:\Users\<you>\buddy\`).
-3. From that folder, run `.\manage.ps1 -Install` in PowerShell.
-
-`manage.ps1 -Install` drops a Startup shortcut (`ClaudeBuddyRelay.lnk`) that runs
-`pythonw relay.py` hidden in your user session and starts it now. `relay.py`
-self-supervises (reconnects on drop) and is **single-instance guarded** (loopback-port
-lock 8791; a second copy logs and exits), so it can't pile up. Logs rotate at 512 KB.
-```powershell
-.\manage.ps1 -Install     # logon shortcut + start now
-.\manage.ps1 -Status      # PID(s) + hub reachability
-.\manage.ps1 -Restart     # stop all + start one
-.\manage.ps1 -Logs        # tail relay.log
-.\manage.ps1 -Uninstall   # remove shortcut + stop
-```
-
-### Pairing the stick (one-time)
-1. Claude desktop app → Hardware Buddy → **Forget** (releases its BLE bond; only one
-   central can hold the stick).
-2. Wake the stick; confirm Bluetooth on (hold A → settings → bluetooth).
-3. Run the relay; enter the 6-digit passkey the stick shows. The relay holds that
-   passkey on screen while it waits for you to bond — **60s** by default
-   (`--pair-timeout`); the same code stays valid the whole time. `python relay.py
-   --console --no-pair` tries an unencrypted link if bonding is fussy.
-
----
-
-### Durability
-- Hub auto-restarts (`Restart=always`), tunnel auto-reconnects, both linger across
-  logout. Hub runs `python3 -u`, so relay connect/disconnect and device decisions
-  show live in `journalctl --user -u buddyhub.service -f`.
-- **Clean reconnects:** when the stick power-cycles, the relay reconnects with a
-  fresh socket that *takes over* from the stale one; the hub re-sends the full state
-  (time, owner, heartbeat) on every relay connect.
-- **Idle sessions** persist 30 min (`STALE_SESSION_SEC`) before being reaped. A
-  session counts as alive only while it emits events (start/prompt/stop) or until
-  `SessionEnd`; sessions idle longer drop from the count until their next activity.
-  (Exact long-idle tracking would need a per-machine liveness reporter — not built.)
-- Hub state is in-memory: restarting `buddyhub.service` clears sessions; they
-  re-register on their next event.
-
-## Hub HTTP API (`:8787`)
-
-| Method + path | Body | Purpose |
-| ------------- | ---- | ------- |
-| `GET /` , `GET /dashboard` | — | **Web dashboard** — live state + browser approve/deny (no stick needed) |
-| `GET /detail` | — | richer JSON: per-machine + per-session breakdown (what the dashboard polls) |
-| `POST /event` | `{machine,session,kind,msg?,tokens?}` (`kind`: session_start/session_end/running/idle/tool_done) | session state |
-| `POST /permission` | `{machine,session,tool,hint}` → `{id}` | register a prompt |
-| `GET /decision?id=&wait=` | — → `{decision: once\|deny\|timeout}` | long-poll for the device answer |
-| `POST /button` | `{decision: once\|deny}` | manual A/B (transport-independent; works without the stick) |
-| `GET /state` | — | debug snapshot (current heartbeat) |
-
-### Heartbeat / device states
-`total`, `running`, `waiting`, `tokens`, `entries[]` (machine-tagged), `msg`,
-optional `prompt{id,tool,hint}`. Device states: `sleep` (disconnected),
-`idle`, `busy` (running>0), `attention` (waiting>0, LED blinks), plus the
-firmware's `celebrate`/`dizzy`/`heart`.
-
-### Relay TCP protocol (`:8790`)
-Newline-delimited JSON. On connect the hub sends `{"time":[epoch,offset]}`,
-`{"cmd":"owner","name":...}`, then heartbeats. The relay forwards the stick's
-lines back; `{"cmd":"permission","id","decision"}` resolves a prompt.
-
----
-
-## The `tty` character
-
-A minimalist living-terminal GIF pack (the cursor *is* the pet), generated in code:
-```bash
-python3 build_tty.py terra      # or: amber   → characters/tty/
-```
-Seven states map to CLI primitives: `sleep` (dim `$_`), `idle` (`$` blink + self-types
-`ls`), `busy` (`$` spinner), `attention` (`allow? [y/n]` urgent), `celebrate`
-(`lvl up` bar + sparkles), `dizzy` (glyph scramble), `heart` (pulsing ♥).
-
-Loading it needs a **USB flash** (the wireless folder-drop is a desktop-app feature
-this relay doesn't implement). The `flash_character.py` tool lives in the
-[`claude-desktop-buddy`](https://github.com/anthropics/claude-desktop-buddy) repo:
-```bash
-usbipd attach --wsl --busid 4-3        # FTDI 0403:6001; bind persists
-python3 path/to/claude-desktop-buddy/tools/flash_character.py characters/tty
-# then on the stick: hold A → settings → species → GIF
-```
+1. If the Claude desktop app held the stick: **Developer → Hardware Buddy → Forget**.
+2. Wake the stick; confirm Bluetooth is on (hold A → settings → bluetooth).
+3. `buddyctl relay pair` — enter the 6-digit passkey the stick shows. The relay
+   holds that passkey on screen for 60s while you type it.
 
 ---
 
@@ -285,16 +135,24 @@ python3 path/to/claude-desktop-buddy/tools/flash_character.py characters/tty
 
 | Symptom | Cause / fix |
 | ------- | ----------- |
-| A machine's activity never shows; its prompts hit the **terminal** not the stick | That session started **before** the hooks were installed. Restart it (hooks load at session start). |
+| Stick flaps between states / relay connect-disconnect loop | The desktop app is fighting the relay for the stick. **Forget** Hardware Buddy in the app (and leave it forgotten), then `buddyctl relay uninstall && buddyctl relay install`. |
+| A machine's activity never shows | Its `claude` session started **before** hooks were installed — restart it. Or check `buddyctl status`. |
 | Activity shows but A/B does nothing | Session wasn't launched via `buddy` (no `BUDDY_CONTROL=1`) — ambient works, control doesn't. |
-| `remote` silent | Check the tunnel: `systemctl --user status buddy-tunnel.service`; from remote `curl -m5 localhost:8787/state`. |
-| Relay won't connect to hub | Hub up? `curl localhost:8787/state`. From Windows the hub is `127.0.0.1:8790` via WSL2 localhost-forwarding; if WSL switches to **mirrored networking** the address changes. |
-| Stick stuck on `sleep` | Relay not connected / not paired. Check `C:\Users\<you>\buddy\relay.log`; re-pair (Forget in desktop app first). |
-| Relay never finds / connects the stick (scan times out) | The **desktop app's background bridge is holding it** — it auto-reconnects even with its window closed. **Forget** the device in the app (or quit the app), then restart the relay. Only one central can connect at a time. |
-| Firewall / interactive login (`gcloud`, passkey) | The relay's BLE pairing prompt appears on the Windows desktop — must be done in your user session. |
+| Remote machine silent | Hub reachable from it? `curl -m5 http://HUBHOST:8787/state`. Tunnel up? `buddyctl status`. |
+| Relay never finds the stick | Desktop app still holds it (Forget it), or it isn't paired: `buddyctl relay pair`. |
+| `buddy-relay` says it needs Bluetooth | Install the extra: `pipx install "buddy-bridge[relay] @ git+…"`. |
 
-### Key facts
-- The WSL host IP is **dynamic** (changes on WSL restart); the relay uses
-  `127.0.0.1` so it doesn't care.
-- Windows Python: `C:\Users\<you>\AppData\Local\Programs\Python\Python312\python.exe` + `bleak`.
-- Stick: M5StickC Plus, M5Stack **K016-P**, USB-serial FTDI `0403:6001` (usbipd busid `4-3`).
+---
+
+## Develop
+
+```bash
+git clone https://github.com/ttpears/buddy-bridge && cd buddy-bridge
+python -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev,relay]"
+pytest
+```
+
+Roles run directly as modules too: `python -m buddybridge.hub`,
+`python -m buddybridge.relay`, `python -m buddybridge.ctl`. Regenerate the `tty`
+character pack with `build-tty terra` (needs the `[tty]` extra).

@@ -5,11 +5,11 @@ Bridges buddyhub's TCP relay socket <-> the stick's BLE Nordic UART.
 
 Self-contained: a supervising loop (restarts its own connections), a
 single-instance guard (a loopback-port lock — a second copy exits immediately,
-so it can't pile up), and a size-capped rotating log. Run hidden via pythonw;
-managed by manage.ps1.
+so it can't pile up), and a size-capped rotating log. Installed and run as a
+background service by `buddyctl relay install`.
 
-  pythonw relay.py             # hidden background run (logs to relay.log)
-  python  relay.py --console   # foreground + console logging (debugging)
+  buddy-relay                   # background run (logs to relay.log)
+  buddy-relay --console         # foreground + console logging (debugging)
 """
 import argparse
 import asyncio
