@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from buddybridge import config
-from buddybridge.ctl import hooks, services
+from buddybridge.ctl import hooks, services, tunnel
 
 
 def _claude_settings_path():
@@ -23,13 +23,21 @@ def _python_for_service():
 # ---- client ------------------------------------------------------------- #
 def _client_install(args):
     cfg = config.load_config()
-    if args.hub:
+    if args.tunnel:
+        # A forward tunnel makes the hub local; point the hub at 127.0.0.1 and
+        # register the ssh service that keeps it up.
+        services.register("buddy-tunnel", tunnel.forward_tunnel_cmd(args.tunnel),
+                          f"Claude Buddy forward tunnel to {args.tunnel}")
+        cfg["hub"] = "http://127.0.0.1:8787"
+    elif args.hub:
         cfg["hub"] = args.hub.rstrip("/")
     cfg.setdefault("hub", "http://127.0.0.1:8787")
     cfg["machine"] = args.name or cfg.get("machine") or socket.gethostname().split(".")[0]
     config.save_config(cfg)
     cmd = hooks.install(str(_claude_settings_path()))
     print(f"client installed: machine={cfg['machine']}  hub={cfg['hub']}")
+    if args.tunnel:
+        print(f"  forward tunnel -> {args.tunnel} (hub reachable at 127.0.0.1:8787)")
     print(f"  hook command: {cmd}")
     print("  restart any running `claude` session to load the hooks.")
 
