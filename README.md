@@ -26,6 +26,9 @@ across any number of machines.
   with **Python 3 + `bleak`**.
 - **Python 3** on each machine running Claude Code (the hooks are stdlib-only).
 
+Python deps: `pip install -r requirements.txt` (`bleak` on the relay host;
+`Pillow` only if you rebuild the `tty` character — the hub and hooks need nothing).
+
 `relay.py` is its own BLE central and connects to the stick directly, so the
 desktop app is not a *dependency*. **But you must make sure the desktop app isn't
 holding the stick:** only one central can connect at a time, and the app's
@@ -179,6 +182,11 @@ journalctl --user -u buddyhub.service -f
 - `buddyhub.service` → `buddyhub.py --port 8787 --transport relay --owner you`
   (listens `:8787` HTTP, `:8790` relay).
 - `buddy-tunnel.service` → `ssh -N -R 8787:localhost:8787 workpc`.
+
+Example unit files are in [`systemd/`](systemd/) — copy them to
+`~/.config/systemd/user/`, edit the paths / SSH host, then
+`systemctl --user enable --now buddyhub.service buddy-tunnel.service`. The tunnel
+is only needed for a second machine.
 
 ### BLE relay (Windows, Startup shortcut at logon)
 The relay runs as a per-user **Startup shortcut**, not a SYSTEM service — BLE bonds
