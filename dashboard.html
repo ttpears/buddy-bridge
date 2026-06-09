@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>claude // buddy — control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#0a0b0e;--panel:#0f1218;--panel2:#0c0f14;--line:#1b212c;--fg:#e7edf3;
+        --dim:#69707f;--cr:#d97757;--ok:#56d364;--busy:#e3b341;--alert:#ff5c5c}
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:radial-gradient(130% 90% at 50% -15%,#13161d 0%,var(--bg) 58%),var(--bg);
+       color:var(--fg);min-height:100vh;-webkit-font-smoothing:antialiased;
+       font:13px/1.45 'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
+  body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.16;
+       background:linear-gradient(var(--line) 1px,transparent 1px) 0 0/100% 40px,
+                  linear-gradient(90deg,var(--line) 1px,transparent 1px) 0 0/40px 100%;
+       -webkit-mask:radial-gradient(125% 100% at 50% 0,#000 38%,transparent 100%);
+               mask:radial-gradient(125% 100% at 50% 0,#000 38%,transparent 100%)}
+  body.alert::after{content:"";position:fixed;inset:0;z-index:3;pointer-events:none;
+       box-shadow:inset 0 0 140px -46px rgba(255,92,92,.6)}
+  main{position:relative;z-index:1;max-width:780px;margin:0 auto;padding:24px 20px 44px}
+  .bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;
+       border-bottom:1px solid var(--line);padding-bottom:15px;margin-bottom:18px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .lamp{width:10px;height:10px;border-radius:2px;background:var(--dim);transition:.3s}
+  .lamp.ok{background:var(--ok);box-shadow:0 0 12px -1px var(--ok)}
+  .lamp.busy{background:var(--busy);box-shadow:0 0 12px -1px var(--busy)}
+  .lamp.alert{background:var(--alert);box-shadow:0 0 13px 0 var(--alert);animation:blink 1s steps(2,end) infinite}
+  @keyframes blink{50%{opacity:.32}}
+  .wm{font-weight:800;letter-spacing:.24em;font-size:14px}
+  .wm i{color:var(--cr);font-style:normal;margin:0 .12em}
+  .meta{display:flex;align-items:center;gap:9px;color:var(--dim);font-size:10.5px;
+        letter-spacing:.14em;text-transform:uppercase}
+  .meta .state{color:var(--fg);font-weight:700}
+  .meta .sep{opacity:.35}
+  .cluster{display:grid;grid-template-columns:repeat(4,1fr);background:var(--panel2);
+       border:1px solid var(--line);border-radius:5px;overflow:hidden;margin-bottom:16px}
+  .rd{padding:15px 18px;border-right:1px solid var(--line)}
+  .rd:last-child{border-right:0}
+  .rd .n{font-size:30px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+  .rd .l{margin-top:8px;color:var(--dim);font-size:9.5px;letter-spacing:.2em;text-transform:uppercase}
+  .rd.busy .n{color:var(--busy)} .rd.alert .n{color:var(--alert)}
+  .nodes{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+  .node{display:flex;align-items:center;gap:8px;background:var(--panel);
+       border:1px solid var(--line);border-radius:3px;padding:8px 12px}
+  .node .nm{font-weight:700;letter-spacing:.03em}
+  .node .c{color:var(--dim);font-size:11px}
+  .dotmini{width:7px;height:7px;border-radius:50%;flex:none;background:var(--dim)}
+  .dotmini.ok{background:var(--ok)} .dotmini.busy{background:var(--busy)} .dotmini.alert{background:var(--alert)}
+  .panel{background:var(--panel2);border:1px solid var(--line);border-radius:5px;
+       overflow:hidden;margin-bottom:14px}
+  .phead{display:flex;justify-content:space-between;align-items:center;background:var(--panel);
+       border-bottom:1px solid var(--line);padding:9px 14px;color:var(--dim);
+       font-size:10px;letter-spacing:.22em;text-transform:uppercase}
+  .phead .cnt{color:var(--cr);letter-spacing:.05em}
+  .thead{display:grid;grid-template-columns:150px 88px 1fr 50px;gap:12px;padding:7px 14px;
+       border-bottom:1px solid var(--line);color:var(--dim);opacity:.7;
+       font-size:9px;letter-spacing:.18em;text-transform:uppercase}
+  #sessions{list-style:none;margin:0;padding:0}
+  #sessions li{display:grid;grid-template-columns:150px 88px 1fr 50px;gap:12px;align-items:center;
+       padding:10px 14px;border-bottom:1px solid var(--line)}
+  #sessions li:last-child{border-bottom:0}
+  .s-node{display:flex;align-items:center;gap:8px;color:var(--cr);font-weight:700;
+       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .st{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+  .st.running{color:var(--busy)} .st.waiting{color:var(--alert)} .st.idle{color:var(--dim)}
+  .act{color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .age{text-align:right;color:var(--dim);font-size:11px;font-variant-numeric:tabular-nums}
+  .log ul{list-style:none;margin:0;padding:6px 0}
+  .log li{display:flex;gap:9px;padding:5px 14px;color:var(--dim);font-size:12px;
+       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .log .gt{color:var(--cr)} .log .tag{color:var(--cr);font-weight:600}
+  .empty{padding:18px 14px;text-align:center;color:var(--dim)}
+  .prompt{border:1px solid var(--alert);border-radius:5px;padding:16px;margin-bottom:16px;
+       background:linear-gradient(180deg,rgba(255,92,92,.07),rgba(255,92,92,.015));
+       animation:pulse 1.7s ease-in-out infinite}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 1px var(--alert),0 0 26px -8px rgba(255,92,92,.55)}
+       50%{box-shadow:0 0 0 1px var(--alert),0 0 44px -2px rgba(255,92,92,.8)}}
+  .prompt .pl{display:flex;align-items:center;gap:9px;color:var(--alert);font-weight:800;
+       letter-spacing:.18em;text-transform:uppercase;font-size:11px;margin-bottom:11px}
+  .prompt .pl b{color:var(--fg);font-weight:700;letter-spacing:.04em;text-transform:none}
+  .cmd{display:flex;gap:11px;background:#080a0e;border:1px solid var(--line);border-radius:3px;
+       padding:12px 13px;margin-bottom:14px;font-size:13px;word-break:break-all}
+  .cmd .gt{color:var(--cr);font-weight:700}
+  .btns{display:flex;gap:10px}
+  .btns button{flex:1;padding:13px;border-radius:3px;border:1px solid var(--line);background:transparent;
+       color:var(--fg);font-family:inherit;font-weight:700;font-size:12px;letter-spacing:.1em;
+       text-transform:uppercase;cursor:pointer;transition:.15s}
+  .btns .approve{background:var(--ok);color:#06210f;border-color:transparent}
+  .btns .approve:hover{filter:brightness(1.08)}
+  .btns .deny{color:var(--alert);border-color:rgba(255,92,92,.5)}
+  .btns .deny:hover{background:rgba(255,92,92,.1)}
+  .btns .k{opacity:.55;margin-right:8px;font-weight:800}
+  footer{margin-top:14px;text-align:right;color:var(--dim);font-size:10px;
+       letter-spacing:.14em;text-transform:uppercase}
+  .cluster,.nodes,.panel,#promptCard{animation:rise .5s both}
+  .nodes{animation-delay:.04s} .panel{animation-delay:.09s}
+  @keyframes rise{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+  @media(max-width:560px){.cluster{grid-template-columns:repeat(2,1fr)}
+    .thead,#sessions li{grid-template-columns:1fr 74px 46px}
+    .thead span:nth-child(3),.act{display:none}}
+</style></head>
+<body><main>
+  <header class="bar">
+    <div class="brand"><span class="lamp" id="lamp"></span><span class="wm">CLAUDE<i>//</i>BUDDY</span></div>
+    <div class="meta"><span class="state" id="state">—</span><span class="sep">/</span>
+      <span id="nmach">0 nodes</span><span class="sep">/</span><span id="clock">--:--:--</span></div>
+  </header>
+  <section class="cluster">
+    <div class="rd"><div class="n" id="total">0</div><div class="l">sessions</div></div>
+    <div class="rd" id="rd-run"><div class="n" id="running">0</div><div class="l">running</div></div>
+    <div class="rd" id="rd-wait"><div class="n" id="waiting">0</div><div class="l">waiting</div></div>
+    <div class="rd"><div class="n" id="tokens">0</div><div class="l">tokens</div></div>
+  </section>
+  <section class="nodes" id="machines"></section>
+  <div id="promptCard"></div>
+  <section class="panel"><div class="phead"><span>sessions</span><span class="cnt" id="scount"></span></div>
+    <div class="thead"><span>node</span><span>status</span><span>activity</span><span>age</span></div>
+    <ul id="sessions"></ul></section>
+  <section class="panel log"><div class="phead"><span>activity log</span></div>
+    <ul id="entries"></ul></section>
+  <footer id="foot">connecting…</footer>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+function esc(s){return (s+'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function pad(n){return (n<10?'0':'')+n}
+async function decide(d){try{await fetch('/button',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({decision:d})});}catch(e){} tick();}
+async function tick(){
+  try{
+    const d=await (await fetch('/detail',{cache:'no-store'})).json();
+    let st='SLEEP'; if(d.waiting)st='ATTENTION'; else if(d.running)st='BUSY'; else if(d.total)st='IDLE';
+    $('lamp').className='lamp '+({SLEEP:'',IDLE:'ok',BUSY:'busy',ATTENTION:'alert'}[st]);
+    $('state').textContent=st;
+    document.body.classList.toggle('alert',st==='ATTENTION');
+    $('total').textContent=d.total; $('running').textContent=d.running;
+    $('waiting').textContent=d.waiting; $('tokens').textContent=(d.tokens||0).toLocaleString();
+    $('rd-run').classList.toggle('busy',d.running>0);
+    $('rd-wait').classList.toggle('alert',d.waiting>0);
+    const M=d.machines||{}, mk=Object.keys(M);
+    $('nmach').textContent=mk.length+(mk.length===1?' node':' nodes');
+    $('machines').innerHTML=Object.entries(M).map(([nm,m])=>{
+      const c=m.waiting?'alert':(m.running?'busy':'ok');
+      return `<div class="node"><span class="dotmini ${c}"></span><span class="nm">${esc(nm)}</span>`+
+             `<span class="c">${m.running||0} run / ${m.idle||0} idle</span></div>`;}).join('')
+             ||'<div class="node"><span class="dotmini"></span><span class="c">no nodes connected</span></div>';
+    $('promptCard').innerHTML=d.prompt?(()=>{const p=d.prompt,g=p.tool==='Bash'?'$':'›';
+      return `<div class="prompt"><div class="pl">&#9873; permission required <b>${esc(p.tool)}</b></div>`+
+        `<div class="cmd"><span class="gt">${g}</span><span>${esc(p.hint||'')}</span></div>`+
+        `<div class="btns"><button class="approve" onclick="decide('once')"><span class="k">A</span>approve</button>`+
+        `<button class="deny" onclick="decide('deny')"><span class="k">B</span>deny</button></div></div>`;})():'';
+    const S=d.sessions||[]; $('scount').textContent=S.length?S.length+' active':'';
+    $('sessions').innerHTML=S.length?S.slice(0,14).map(s=>{
+      const dc=s.status==='waiting'?'alert':(s.status==='running'?'busy':'ok'), age=s.idle>1?s.idle+'s':'now';
+      return `<li><span class="s-node"><span class="dotmini ${dc}"></span>${esc(s.machine)}</span>`+
+        `<span class="st ${s.status}">${esc(s.status)}</span>`+
+        `<span class="act">${esc(s.msg||'—')}</span><span class="age">${age}</span></li>`;
+    }).join(''):'<li class="empty">no active sessions</li>';
+    $('entries').innerHTML=(d.entries&&d.entries.length)?d.entries.map(e=>{
+      const m=e.split(' ▸ ');return m.length>1
+        ?`<li><span class="gt">▸</span><span class="tag">${esc(m[0])}</span>&nbsp;${esc(m.slice(1).join(' ▸ '))}</li>`
+        :`<li><span class="gt">▸</span>${esc(e)}</li>`;}).join(''):'<li class="empty">no recent activity</li>';
+    const t=new Date(), c=pad(t.getHours())+':'+pad(t.getMinutes())+':'+pad(t.getSeconds());
+    $('clock').textContent=c; $('foot').textContent='updated '+c+' / polling 1s';
+  }catch(e){$('foot').textContent='hub unreachable';$('lamp').className='lamp alert';}
+}
+tick(); setInterval(tick,1000);
+</script></body></html>
