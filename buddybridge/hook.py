@@ -16,7 +16,7 @@ Config (env):
   BUDDY_MACHINE  name shown on device  (default: hostname)
 
 Wire it up (per event) as:
-  {"type":"command","command":"python3 /path/buddy-hook.py","timeout":60}
+  {"type":"command","command":"python3 -m buddybridge.hook","timeout":60}
 """
 import json
 import os

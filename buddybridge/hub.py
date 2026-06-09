@@ -12,7 +12,7 @@ the full remote-permission control loop with zero hardware.
 
 stdlib only — runs anywhere python3 does.
 
-  python3 buddyhub.py --port 8787
+  buddyhub --port 8787            # console entry point (installed via pip/pipx)
 
 HTTP API (hooks POST here):
   POST /event       {machine, session, kind, msg?, tokens?}
