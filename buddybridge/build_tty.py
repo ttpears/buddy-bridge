@@ -26,7 +26,7 @@ CAP = font.getbbox("A")[3] - font.getbbox("A")[1]
 X0 = 2
 Y1 = 13            # single-line baseline
 YA, YB = 7, 18     # two-line baselines
-OUT = Path(__file__).resolve().parent / "characters" / "tty"
+OUT = Path(__file__).resolve().parent / "resources" / "characters" / "tty"
 
 HEART = ["011011", "111111", "111111", "011110", "001100", "000100"]
 
