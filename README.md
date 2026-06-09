@@ -17,6 +17,22 @@ across any number of machines.
 > This is an independent, unofficial project built on the public BLE protocol. It
 > is not affiliated with, endorsed by, or supported by Anthropic.
 
+### What you need
+- An **M5StickC Plus** flashed with the
+  [`claude-desktop-buddy`](https://github.com/anthropics/claude-desktop-buddy)
+  firmware — a one-time flash over USB (PlatformIO; see that repo). buddy-bridge
+  ships no firmware and only talks to a device already running it.
+- A host with a Bluetooth radio to run `relay.py` (here, the Windows laptop),
+  with **Python 3 + `bleak`**.
+- **Python 3** on each machine running Claude Code (the hooks are stdlib-only).
+
+You do **not** need the Claude desktop app running. `relay.py` is its own BLE
+central and pairs with the stick directly. The app matters only if the stick is
+already bonded to it — BLE allows one central at a time, so you **Forget** it
+there once to hand the stick over (see *Pairing the stick*). The one desktop-app
+feature buddy-bridge doesn't replicate is the *wireless* character drop — load
+characters over USB instead (see *The `tty` character*).
+
 ---
 
 ## Architecture
@@ -24,7 +40,7 @@ across any number of machines.
 ```
   desk (WSL)                                            Windows laptop
   ┌───────────────────────────┐                        ┌────────────────────────┐
-  │ claude sessions ─ hooks ─┐ │                        │ ble_relay.py (bleak)   │
+  │ claude sessions ─ hooks ─┐ │                        │ relay.py (bleak)       │
   │ remote sessions ─hooks───┼─┼─► buddyhub (systemd)   │   ▲ TCP 127.0.0.1:8790  │
   │   (via SSH reverse tunnel)│ │   :8787 http API      │   │ (WSL localhost-fwd) │
   │                           │ │   :8790 relay socket ─┼───┘                     │
@@ -38,7 +54,7 @@ across any number of machines.
   state from every machine, owns the permission queue, and speaks the Hardware
   Buddy protocol through a pluggable transport.
 - **BLE radio** lives on the Windows laptop (its Bluetooth; only on when you work).
-  A thin relay (`ble_relay.py`) bridges the hub's TCP socket to the stick's BLE.
+  A thin relay (`relay.py`) bridges the hub's TCP socket to the stick's BLE.
 - **Remote machine** `remote` reaches the hub over an **SSH reverse tunnel**, so
   no inbound ports are exposed.
 
@@ -60,7 +76,7 @@ across any number of machines.
 | `relay.py`                   | Windows       | bleak ↔ stick (Nordic UART) ↔ hub TCP; self-supervising, single-instance, rotating log |
 | `manage.ps1`                 | Windows       | relay control: `-Install/-Restart/-Stop/-Status/-Logs/-Uninstall` |
 | `build_tty.py`               | WSL           | Generates the `tty` character pack → `characters/tty/` |
-| `~/.local/bin/buddy`         | every machine | `BUDDY_CONTROL=1 claude` launcher (opt-in stick control) |
+| `buddy`                      | every machine | `BUDDY_CONTROL=1 claude` launcher (opt-in stick control); symlink onto your PATH |
 | `C:\Users\<you>\buddy\`      | Windows       | `relay.py`, `manage.ps1`, `relay.log` |
 
 ---
@@ -97,6 +113,38 @@ claude hits a tool needing approval
   → you press A → stick sends {"cmd":"permission","id","once"} → relay → hub
   → hub resolves the long-poll → hook emits decision.behavior=allow → tool runs
 ```
+
+---
+
+## Setup
+
+On **each machine** that runs Claude Code:
+
+1. **Install the hooks** into that machine's Claude Code settings (idempotent —
+   preserves any non-buddy hooks; re-run to update):
+   ```bash
+   python3 install_hooks.py ~/.claude/settings.json "$(hostname -s)" \
+       http://127.0.0.1:8787 "$PWD/buddy-hook.py"
+   ```
+   The machine name and hub URL are baked into the installed hook command. On
+   `remote` the hub URL is still `http://127.0.0.1:8787` (the SSH reverse tunnel
+   lands there); pass whatever name you want shown on the device.
+
+2. **Install the `buddy` launcher** (shipped in this repo) onto your PATH so
+   opt-in sessions route approvals to the stick — it just sets `BUDDY_CONTROL=1`
+   before `claude`:
+   ```bash
+   ln -s "$PWD/buddy" ~/.local/bin/buddy
+   ```
+   Plain `claude` stays ambient-only and is never intercepted.
+
+On the **hub machine** (WSL), run the hub:
+```bash
+python3 buddyhub.py --port 8787 --transport relay --owner you
+```
+Use `--transport mock` to drive it from the keyboard with no hardware at all —
+type `a`/`d` to approve/deny, `s` for state, `q` to quit. For always-on, wire the
+hub into systemd and set up the Windows BLE relay (both under *Operations*).
 
 ---
 

@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+# buddy — launch Claude Code with Hardware Buddy stick control enabled.
+#
+# Sets BUDDY_CONTROL=1 so THIS session's permission prompts route to the stick
+# (and the web dashboard) for A/B approval. Plain `claude` stays ambient-only
+# (busy/idle activity feed) and is never intercepted.
+#
+# Install by symlinking (or copying) onto your PATH, e.g.:
+#   ln -s "$PWD/buddy" ~/.local/bin/buddy
+#
+# The machine name and hub URL come from the hooks installed by install_hooks.py,
+# not from here — this wrapper only flips on control.
+exec env BUDDY_CONTROL=1 claude "$@"
