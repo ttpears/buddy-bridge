@@ -16,9 +16,11 @@ import asyncio
 import logging
 import logging.handlers
 import socket
+import sys
 from pathlib import Path
 
-from bleak import BleakScanner, BleakClient
+# bleak is the optional [relay] extra — imported lazily so `buddy-relay --help`
+# and importing this module work without it; main() checks for it up front.
 
 NUS_SVC = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
 NUS_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"   # write   host -> device
@@ -59,6 +61,7 @@ async def _drain(writer):
 
 
 async def relay_once(host, port, name_prefix, scan_timeout, do_pair, pair_timeout):
+    from bleak import BleakScanner, BleakClient
     logging.info("connecting to hub %s:%d", host, port)
     reader, writer = await asyncio.open_connection(host, port)
     logging.info("hub connected; scanning for the stick")
@@ -137,6 +140,14 @@ def main():
     args = ap.parse_args()
     args.host, _, port = args.hub.partition(":")
     args.port = int(port or 8790)
+
+    try:
+        import bleak  # noqa: F401
+    except ModuleNotFoundError:
+        print("buddy-relay needs Bluetooth support. Install it with:\n"
+              "    pipx install 'buddy-bridge[relay]'   (or: pip install bleak)",
+              file=sys.stderr)
+        sys.exit(1)
 
     setup_logging(args.console)
     if not single_instance():

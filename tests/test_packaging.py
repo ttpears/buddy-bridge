@@ -29,6 +29,14 @@ def test_runnable_modules_expose_main():
         assert callable(mod.main), f"{name}.main missing"
 
 
+def test_relay_module_imports_without_bleak(monkeypatch):
+    # bleak is the optional [relay] extra; importing the module must not require it.
+    import sys
+    monkeypatch.setitem(sys.modules, "bleak", None)  # makes `import bleak` raise
+    mod = importlib.reload(importlib.import_module("buddybridge.relay"))
+    assert callable(mod.main)
+
+
 def test_launcher_sets_control_env(monkeypatch):
     import buddybridge.launcher as launcher
     captured = {}
