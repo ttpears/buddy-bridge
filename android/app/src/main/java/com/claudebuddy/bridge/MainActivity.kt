@@ -77,9 +77,21 @@ class MainActivity : ComponentActivity() {
                 val httpRunning by svc?.httpRunning?.collectAsState()
                     ?: remember { mutableStateOf(false) }
 
-                val ownerName by settings.ownerName.collectAsState(initial = "")
-                val buddyToken by settings.buddyToken.collectAsState(initial = "")
+                // Local state for text fields (instant updates); DataStore
+                // provides the initial value and persists in the background.
+                val savedOwner by settings.ownerName.collectAsState(initial = "")
+                val savedToken by settings.buddyToken.collectAsState(initial = "")
+                var ownerName by remember { mutableStateOf("") }
+                var buddyToken by remember { mutableStateOf("") }
                 val scope = rememberCoroutineScope()
+
+                // Seed local state from DataStore once loaded
+                LaunchedEffect(savedOwner) {
+                    if (ownerName.isEmpty() && savedOwner.isNotEmpty()) ownerName = savedOwner
+                }
+                LaunchedEffect(savedToken) {
+                    if (buddyToken.isEmpty() && savedToken.isNotEmpty()) buddyToken = savedToken
+                }
 
                 BridgeScreen(
                     isRunning = running,
@@ -88,11 +100,13 @@ class MainActivity : ComponentActivity() {
                     httpRunning = httpRunning,
                     ownerName = ownerName,
                     onOwnerNameChange = { name ->
+                        ownerName = name
                         svc?.ownerName = name
                         scope.launch { settings.setOwnerName(name) }
                     },
                     buddyToken = buddyToken,
                     onBuddyTokenChange = { token ->
+                        buddyToken = token
                         svc?.buddyToken = token
                         scope.launch { settings.setBuddyToken(token) }
                     },
