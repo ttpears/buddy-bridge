@@ -29,7 +29,7 @@ class MainActivity : ComponentActivity() {
 
     private val serviceRef = mutableStateOf<BuddyService?>(null)
     private val isRunning = mutableStateOf(false)
-    private var bound = false
+    private var bindRequested = false  // true after bindService returns true
 
     private lateinit var settings: SettingsRepository
 
@@ -38,7 +38,6 @@ class MainActivity : ComponentActivity() {
             val svc = (binder as BuddyService.LocalBinder).service
             serviceRef.value = svc
             isRunning.value = true
-            bound = true
             // Push persisted settings onto the service
             CoroutineScope(Dispatchers.Main).launch {
                 svc.ownerName = settings.ownerName.first()
@@ -47,9 +46,9 @@ class MainActivity : ComponentActivity() {
             Log.i("MainActivity", "service bound")
         }
         override fun onServiceDisconnected(name: ComponentName) {
+            // Only called when service process dies unexpectedly
             serviceRef.value = null
             isRunning.value = false
-            bound = false
         }
     }
 
@@ -70,12 +69,24 @@ class MainActivity : ComponentActivity() {
                 val svc by serviceRef
                 val running by isRunning
 
-                val bleState by svc?.bleState?.collectAsState()
-                    ?: remember { mutableStateOf(BleState.DISCONNECTED) }
-                val bleDeviceName by svc?.bleDeviceName?.collectAsState()
-                    ?: remember { mutableStateOf<String?>(null) }
-                val httpRunning by svc?.httpRunning?.collectAsState()
-                    ?: remember { mutableStateOf(false) }
+                // Stable state holders — avoid conditional collectAsState which
+                // can destabilize Compose's call tree when svc flips null/non-null
+                var bleState by remember { mutableStateOf(BleState.DISCONNECTED) }
+                var bleDeviceName by remember { mutableStateOf<String?>(null) }
+                var httpRunning by remember { mutableStateOf(false) }
+
+                LaunchedEffect(svc) {
+                    val s = svc
+                    if (s != null) {
+                        launch { s.bleState?.collect { bleState = it } }
+                        launch { s.bleDeviceName?.collect { bleDeviceName = it } }
+                        launch { s.httpRunning.collect { httpRunning = it } }
+                    } else {
+                        bleState = BleState.DISCONNECTED
+                        bleDeviceName = null
+                        httpRunning = false
+                    }
+                }
 
                 // Local state for text fields (instant updates); DataStore
                 // provides the initial value and persists in the background.
@@ -112,10 +123,10 @@ class MainActivity : ComponentActivity() {
                     },
                     onToggle = {
                         if (running) {
-                            try {
-                                unbindService(connection)
-                            } catch (_: Exception) {}
-                            bound = false
+                            if (bindRequested) {
+                                try { unbindService(connection) } catch (_: Exception) {}
+                                bindRequested = false
+                            }
                             stopService(Intent(this, BuddyService::class.java))
                             serviceRef.value = null
                             isRunning.value = false
@@ -123,7 +134,9 @@ class MainActivity : ComponentActivity() {
                             try {
                                 val intent = Intent(this, BuddyService::class.java)
                                 ContextCompat.startForegroundService(this, intent)
-                                bindService(intent, connection, Context.BIND_AUTO_CREATE)
+                                if (bindService(intent, connection, Context.BIND_AUTO_CREATE)) {
+                                    bindRequested = true
+                                }
                             } catch (e: Exception) {
                                 Log.e("MainActivity", "failed to start service", e)
                             }
@@ -137,7 +150,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         // Rebind to the service if it's still running (activity was recreated)
-        if (!bound) {
+        if (!bindRequested) {
             val intent = Intent(this, BuddyService::class.java)
             val ok = try {
                 bindService(intent, connection, 0)  // don't auto-create, just attach if running
@@ -145,7 +158,9 @@ class MainActivity : ComponentActivity() {
                 Log.d("MainActivity", "rebind failed: ${e.message}")
                 false
             }
-            if (!ok) {
+            if (ok) {
+                bindRequested = true
+            } else {
                 // Service is not running — clear any stale state
                 serviceRef.value = null
                 isRunning.value = false
@@ -154,18 +169,11 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        if (bound) {
+        if (bindRequested) {
             try { unbindService(connection) } catch (_: Exception) {}
-            bound = false
-            // Don't clear serviceRef/isRunning — service may still be running,
-            // we'll rebind in onStart() when the activity comes back.
+            bindRequested = false
         }
         super.onStop()
-    }
-
-    override fun onDestroy() {
-        // bound flag is already cleared in onStop()
-        super.onDestroy()
     }
 
     private fun requestPermissions() {
