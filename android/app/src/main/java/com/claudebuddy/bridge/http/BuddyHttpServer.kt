@@ -4,6 +4,7 @@ import com.claudebuddy.bridge.hub.Hub
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
+import java.security.MessageDigest
 
 /**
  * Embedded HTTP server for Claude Code hooks.
@@ -14,6 +15,15 @@ class BuddyHttpServer(
     port: Int = 8787
 ) : NanoHTTPD("0.0.0.0", port) {
 
+    /** Shared token for authenticating hook requests. Empty = auth disabled. */
+    var token: String = ""
+
+    private fun authed(session: IHTTPSession): Boolean {
+        if (token.isEmpty()) return true  // no token configured = open (local-only use)
+        val provided = session.headers["x-buddy-token"] ?: return false
+        return MessageDigest.isEqual(provided.toByteArray(), token.toByteArray())
+    }
+
     override fun serve(session: IHTTPSession): Response {
         return try {
             when (session.method) {
@@ -22,11 +32,15 @@ class BuddyHttpServer(
                 else -> jsonResponse(Response.Status.METHOD_NOT_ALLOWED, """{"ok":false,"error":"method not allowed"}""")
             }
         } catch (e: Exception) {
-            jsonResponse(Response.Status.INTERNAL_ERROR, """{"ok":false,"error":"${e.message}"}""")
+            val safeMsg = (e.message ?: "internal error").replace("\"", "\\\"").replace("\n", " ")
+            jsonResponse(Response.Status.INTERNAL_ERROR, """{"ok":false,"error":"$safeMsg"}""")
         }
     }
 
     private fun handlePost(session: IHTTPSession): Response {
+        if (!authed(session)) {
+            return jsonResponse(Response.Status.UNAUTHORIZED, """{"ok":false,"error":"unauthorized"}""")
+        }
         val body = readBody(session)
         return when (session.uri) {
             "/event" -> {

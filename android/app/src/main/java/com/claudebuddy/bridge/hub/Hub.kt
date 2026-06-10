@@ -15,9 +15,11 @@ class Hub(private val onHeartbeat: (JSONObject) -> Unit) {
 
     companion object {
         const val KEEPALIVE_ACTIVE_SEC = 10L
-        const val KEEPALIVE_IDLE_SEC = 30L
+        const val KEEPALIVE_IDLE_SEC = 20L
+        const val KEEPALIVE_FLOOR_SEC = 20L  // always retransmit after this, even if unchanged
         const val DECISION_TIMEOUT_SEC = 30L
         const val STALE_SESSION_SEC = 300L
+        const val STALE_RUNNING_SEC = 1800L  // running sessions get a longer leash (30 min)
         const val PROMPT_TTL_SEC = 90L
     }
 
@@ -138,10 +140,11 @@ class Hub(private val onHeartbeat: (JSONObject) -> Unit) {
     suspend fun buildHeartbeat(): JSONObject = lock.withLock {
         val now = nowMs()
 
-        // Reap stale sessions
+        // Reap stale sessions (running sessions get a longer timeout)
         val reaped = mutableSetOf<String>()
         val staleKeys = sessions.filter { (_, s) ->
-            now - (s["ts"] as Long) > STALE_SESSION_SEC * 1000
+            val limit = if (s["status"] == "running") STALE_RUNNING_SEC else STALE_SESSION_SEC
+            now - (s["ts"] as Long) > limit * 1000
         }.keys.toList()
         for (k in staleKeys) {
             reaped.add(k.first)

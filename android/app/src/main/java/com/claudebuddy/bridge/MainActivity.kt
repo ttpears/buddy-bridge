@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
                     ?: remember { mutableStateOf(false) }
 
                 var ownerName by remember { mutableStateOf("") }
+                var buddyToken by remember { mutableStateOf("") }
 
                 BridgeScreen(
                     isRunning = running,
@@ -72,6 +73,11 @@ class MainActivity : ComponentActivity() {
                     onOwnerNameChange = { name ->
                         ownerName = name
                         svc?.ownerName = name
+                    },
+                    buddyToken = buddyToken,
+                    onBuddyTokenChange = { token ->
+                        buddyToken = token
+                        svc?.buddyToken = token
                     },
                     onToggle = {
                         if (running) {

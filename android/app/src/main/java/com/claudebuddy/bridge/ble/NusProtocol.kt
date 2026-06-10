@@ -69,23 +69,34 @@ fun buildOwnerCmd(name: String): String {
 }
 
 /**
- * Heartbeat dedup: returns true if the heartbeat differs from the last sent.
+ * Heartbeat dedup: returns true if the heartbeat differs from the last sent,
+ * OR if KEEPALIVE_FLOOR_MS has elapsed (guarantees firmware liveness signal).
  */
 class HeartbeatDedup {
+    companion object {
+        private const val KEEPALIVE_FLOOR_MS = 20_000L  // must be < firmware's 30s window
+    }
+
     private var lastSig: List<Any?>? = null
+    private var lastSentMs: Long = 0L
 
     fun isDifferent(hb: JSONObject): Boolean {
+        val now = System.nanoTime() / 1_000_000
         val prompt = hb.optJSONObject("prompt")
+        val entries = hb.optJSONArray("entries")
+        val entriesHash = if (entries != null) entries.toString().hashCode() else 0
         val sig = listOf(
             hb.optInt("total"),
             hb.optInt("running"),
             hb.optInt("waiting"),
             hb.optInt("tokens"),
             hb.optString("msg"),
-            prompt?.optString("id")
+            prompt?.optString("id"),
+            entriesHash
         )
-        if (sig == lastSig) return false
+        if (sig == lastSig && (now - lastSentMs) < KEEPALIVE_FLOOR_MS) return false
         lastSig = sig
+        lastSentMs = now
         return true
     }
 }

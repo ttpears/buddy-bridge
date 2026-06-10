@@ -14,6 +14,7 @@ a dead bridge must never block you.
 Config (env):
   BUDDY_HUB      hub base URL          (default http://127.0.0.1:8787)
   BUDDY_MACHINE  name shown on device  (default: hostname)
+  BUDDY_TOKEN    shared secret for hub auth (optional, must match hub/app)
 
 Wire it up (per event) as:
   {"type":"command","command":"python3 /path/buddy-hook.py","timeout":60}
@@ -26,6 +27,7 @@ import urllib.request
 
 HUB = os.environ.get("BUDDY_HUB", "http://127.0.0.1:8787").rstrip("/")
 MACHINE = os.environ.get("BUDDY_MACHINE") or socket.gethostname().split(".")[0]
+TOKEN = os.environ.get("BUDDY_TOKEN", "")
 
 # how long the PreToolUse hook waits for a device decision before falling back
 DECISION_WAIT = int(os.environ.get("BUDDY_DECISION_WAIT", "30"))
@@ -33,9 +35,12 @@ QUICK = 2.0          # connect/read timeout for fire-and-forget events
 
 
 def post(path, payload, timeout):
+    headers = {"Content-Type": "application/json"}
+    if TOKEN:
+        headers["X-Buddy-Token"] = TOKEN
     req = urllib.request.Request(HUB + path,
                                  data=json.dumps(payload).encode(),
-                                 headers={"Content-Type": "application/json"},
+                                 headers=headers,
                                  method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read() or b"{}")

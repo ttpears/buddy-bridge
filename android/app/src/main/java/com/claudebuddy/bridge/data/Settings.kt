@@ -13,6 +13,7 @@ object SettingsKeys {
     val OWNER_NAME = stringPreferencesKey("owner_name")
     val HTTP_PORT = intPreferencesKey("http_port")
     val DEVICE_PREFIX = stringPreferencesKey("device_prefix")
+    val BUDDY_TOKEN = stringPreferencesKey("buddy_token")
 }
 
 class SettingsRepository(private val context: Context) {
@@ -29,6 +30,10 @@ class SettingsRepository(private val context: Context) {
         prefs[SettingsKeys.DEVICE_PREFIX] ?: "Claude"
     }
 
+    val buddyToken: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[SettingsKeys.BUDDY_TOKEN] ?: ""
+    }
+
     suspend fun setOwnerName(name: String) {
         context.dataStore.edit { it[SettingsKeys.OWNER_NAME] = name }
     }
@@ -39,5 +44,9 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setDevicePrefix(prefix: String) {
         context.dataStore.edit { it[SettingsKeys.DEVICE_PREFIX] = prefix }
+    }
+
+    suspend fun setBuddyToken(token: String) {
+        context.dataStore.edit { it[SettingsKeys.BUDDY_TOKEN] = token }
     }
 }

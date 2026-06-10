@@ -41,6 +41,13 @@ class BuddyService : Service() {
     // Owner name — set from UI settings
     var ownerName: String = ""
 
+    // Shared token for authenticating hook requests
+    var buddyToken: String = ""
+        set(value) {
+            field = value
+            httpServer?.token = value
+        }
+
     private val _httpRunning = MutableStateFlow(false)
     val httpRunning: StateFlow<Boolean> = _httpRunning
 
@@ -94,6 +101,7 @@ class BuddyService : Service() {
 
         // Create HTTP server
         val http = BuddyHttpServer(h, 8787)
+        http.token = buddyToken  // apply token configured before bridge started
         httpServer = http
 
         // Start everything

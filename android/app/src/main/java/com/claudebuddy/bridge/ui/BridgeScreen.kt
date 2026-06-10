@@ -25,6 +25,8 @@ fun BridgeScreen(
     httpRunning: Boolean,
     ownerName: String,
     onOwnerNameChange: (String) -> Unit,
+    buddyToken: String = "",
+    onBuddyTokenChange: (String) -> Unit = {},
     onToggle: () -> Unit
 ) {
     val focusManager = LocalFocusManager.current
@@ -112,6 +114,17 @@ fun BridgeScreen(
             onValueChange = onOwnerNameChange,
             label = { Text("Owner Name") },
             placeholder = { Text("Shown on buddy device") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = buddyToken,
+            onValueChange = onBuddyTokenChange,
+            label = { Text("Auth Token") },
+            placeholder = { Text("Shared secret for hook requests") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
