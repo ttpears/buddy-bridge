@@ -73,10 +73,19 @@ class BuddyService : Service() {
             .setOngoing(true)
             .build()
 
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
-        } else {
-            startForeground(NOTIF_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            } else {
+                startForeground(NOTIF_ID, notification)
+            }
+        } catch (e: Exception) {
+            // API 34+: SecurityException if BLUETOOTH_CONNECT not granted yet.
+            // Stop self instead of crashing — START_STICKY would restart us in
+            // a crash loop otherwise ("app keeps stopping" dialog).
+            Log.e(TAG, "startForeground failed (missing permission?): ${e.message}")
+            stopSelf()
+            return START_NOT_STICKY
         }
 
         startBridge()

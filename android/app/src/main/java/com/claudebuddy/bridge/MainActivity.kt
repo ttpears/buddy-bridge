@@ -124,11 +124,17 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         // Rebind to the service if it's still running (activity was recreated)
         if (!bound) {
-            try {
-                val intent = Intent(this, BuddyService::class.java)
+            val intent = Intent(this, BuddyService::class.java)
+            val ok = try {
                 bindService(intent, connection, 0)  // don't auto-create, just attach if running
             } catch (e: Exception) {
-                Log.d("MainActivity", "no running service to rebind: ${e.message}")
+                Log.d("MainActivity", "rebind failed: ${e.message}")
+                false
+            }
+            if (!ok) {
+                // Service is not running — clear any stale state
+                serviceRef.value = null
+                isRunning.value = false
             }
         }
     }
