@@ -1,5 +1,10 @@
 # buddy-bridge
 
+[![CI](https://github.com/ttpears/buddy-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/ttpears/buddy-bridge/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ttpears/buddy-bridge?sort=semver)](https://github.com/ttpears/buddy-bridge/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/ttpears/buddy-bridge)](LICENSE)
+[![Firmware](https://img.shields.io/badge/firmware-ttpears%2Fclaude--desktop--buddy-orange)](https://github.com/ttpears/claude-desktop-buddy)
+
 See your Claude **CLI** sessions from every machine on one **M5StickC Plus**
 "Hardware Buddy" — busy/idle, permission prompts, and **approve/deny tool calls
 with the stick's A/B buttons**, including prompts raised on a remote box. A web
@@ -38,6 +43,27 @@ that's the whole multi-machine story.
 > in the app, **Developer → Hardware Buddy → Forget**, and leave it forgotten
 > (closing the window isn't enough — its bridge auto-reconnects in the background).
 > Without the app running this never comes up.
+
+---
+
+## Repositories & releases
+
+Two repos make up the project, plus the upstream they descend from:
+
+| Repo | What lives there | Releases ship |
+| ---- | ---------------- | ------------- |
+| [**ttpears/buddy-bridge**](https://github.com/ttpears/buddy-bridge) (this repo) | the Python **hub / relay / client** (`buddyctl`) and the **Android bridge app** | the **Android APK** (`vX.Y.Z` → [Releases](https://github.com/ttpears/buddy-bridge/releases)) |
+| [**ttpears/claude-desktop-buddy**](https://github.com/ttpears/claude-desktop-buddy) | our **fork of the M5StickC Plus firmware** — the code that runs *on the stick* — plus the BLE wire protocol (`REFERENCE.md`) | a **flashable firmware image** (`firmware.bin`, [Releases](https://github.com/ttpears/claude-desktop-buddy/releases)) |
+| [anthropics/claude-desktop-buddy](https://github.com/anthropics/claude-desktop-buddy) | the original upstream firmware our fork descends from | — |
+
+How they connect: this repo turns **Claude Code hook events** (from any number of
+machines) into the same newline-JSON BLE heartbeat protocol that the **firmware**
+expects — so buddy-bridge drives the exact stick the firmware fork builds.
+Flash the stick from the firmware fork's release, install the hub/relay (or the
+Android app) from here, and the two halves meet over Bluetooth.
+
+> **Unofficial & independent** — not affiliated with, endorsed by, or supported
+> by Anthropic. The firmware fork tracks `anthropics/claude-desktop-buddy`.
 
 ---
 
@@ -139,12 +165,29 @@ and Approve/Deny buttons — the bridge is fully usable with no stick at all.
 
 Instead of running `buddyhub` + `buddy-relay` on a desk machine, the `android/`
 app folds both into a single phone app: it talks BLE to the stick and serves the
-same hub HTTP API on port `8787`. Point your hooks at the phone
-(`BUDDY_HUB=http://<phone-ip>:8787`, typically over Tailscale/VPN) and set a
-matching `BUDDY_TOKEN` on both sides. Build a debug APK via the
-`.github/workflows/build-apk.yml` workflow (or `./gradlew assembleDebug` in
-`android/`). This replaces the WSL-hub-plus-Windows-relay topology when you'd
-rather the bridge live on a phone that's always with you.
+same hub HTTP API on port `8787`. This replaces the WSL-hub-plus-Windows-relay
+topology when you'd rather the bridge live on a phone that's always with you.
+
+**Install (easiest — prebuilt APK):**
+
+1. Grab `buddy-bridge-<version>-debug.apk` from the
+   [**Releases**](https://github.com/ttpears/buddy-bridge/releases/latest) page
+   (verify it against the release's `SHA256SUMS` if you like).
+2. Copy it to the phone and tap to install — allow "install unknown apps" for
+   whatever opens it. The build is debug-signed with a **stable** keystore, so
+   later versions install over the top without uninstalling first.
+3. First launch: grant **Bluetooth** (and, on Android ≤ 11, **Location**) plus
+   **Notifications**, and set the app **Unrestricted** under Battery so its
+   foreground service survives. Set an **Owner** name and (optionally) a
+   **Buddy Token**, then tap **Start**.
+4. Point your machines at the phone: `BUDDY_HUB=http://<phone-ip>:8787` and a
+   matching `BUDDY_TOKEN` — typically over **Tailscale/VPN** so the phone is
+   reachable from your dev boxes.
+
+> Prefer to build it yourself? `cd android && ./gradlew assembleDebug` (JDK 17 +
+> Android SDK) → `android/app/build/outputs/apk/debug/app-debug.apk`. Every push
+> to `main` also builds the APK as a CI artifact, and tagging `vX.Y.Z` cuts a
+> Release with the APK attached automatically.
 
 ## Windows clients
 
@@ -186,3 +229,17 @@ pytest
 Roles run directly as modules too: `python -m buddybridge.hub`,
 `python -m buddybridge.relay`, `python -m buddybridge.ctl`. Regenerate the `tty`
 character pack with `build-tty terra` (needs the `[tty]` extra).
+
+CI runs `pytest` on every PR (`main` is protected and requires it). Tagging
+`vX.Y.Z` builds and publishes the Android APK to Releases.
+
+---
+
+## Credits
+
+- **[@ToxicOrca](https://github.com/ToxicOrca)** — the **Android bridge app**,
+  the bridge **battery optimizations** (adaptive heartbeat, heartbeat dedup,
+  stale-session/transcript fixes), **token auth** (`BUDDY_TOKEN`), and the
+  **Windows wrappers**. Matching battery-life work on the firmware fork too.
+- The firmware and BLE wire protocol descend from
+  [anthropics/claude-desktop-buddy](https://github.com/anthropics/claude-desktop-buddy).
