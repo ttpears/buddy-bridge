@@ -425,6 +425,16 @@ except (OSError, ModuleNotFoundError):
 
 
 
+def resolve_button(hub, data):
+    """Resolve a permission from a /button POST or a device line: honor an
+    explicit prompt id when present, else decide whatever is on screen."""
+    pid = data.get("id")
+    decision = data.get("decision", "once")
+    if pid:
+        return hub.resolve(pid, decision)
+    return hub.resolve_current(decision)
+
+
 def make_handler(hub, token=""):
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):       # quiet
@@ -472,8 +482,7 @@ def make_handler(hub, token=""):
                                               data.get("hint", ""))
                 return self._json(200, {"id": pid})
             if path == "/button":
-                # stand-in for the device A/B buttons (headless test / web UI)
-                ok = hub.resolve_current(data.get("decision", "once"))
+                ok = resolve_button(hub, data)
                 return self._json(200, {"ok": ok})
             return self._json(404, {"ok": False, "error": "no route"})
 
