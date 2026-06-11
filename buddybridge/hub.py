@@ -25,6 +25,7 @@ import argparse
 import hmac
 import json
 import os
+import queue
 import socket
 import sys
 import threading
@@ -312,6 +313,79 @@ class MockTransport:
             elif cmd in ("q", "quit"):
                 import os
                 os._exit(0)
+
+
+class StreamClient:
+    """One connected relay's outbound frame queue (newline-JSON objects)."""
+    def __init__(self):
+        self._q = queue.Queue()
+        self.closed = False
+
+    def put(self, obj):
+        if not self.closed:
+            self._q.put(obj)
+
+    def get(self, timeout=None):
+        return self._q.get(timeout=timeout)
+
+    def empty(self):
+        return self._q.empty()
+
+    def close(self):
+        self.closed = True
+        self._q.put(None)            # sentinel unblocks a waiting writer
+
+
+class HttpRelayTransport:
+    """Heartbeats stream out over HTTP (GET /relay/stream); A/B presses come
+    back via POST /button. Replaces the TCP RelayTransport so everything rides
+    one HTTP port (one URL, one token, Traefik-friendly). One relay at a time:
+    a new attach() displaces the previous client, matching the old socket."""
+    def __init__(self, owner="there"):
+        self.hub = None
+        self.owner = owner
+        self.lock = threading.Lock()
+        self.client = None
+        self._last_sig = None
+        self._last_sent = 0.0
+
+    def attach(self):
+        c = StreamClient()
+        with self.lock:
+            old, self.client = self.client, c
+            self._last_sig = None       # force a full heartbeat to the newcomer
+        if old is not None:
+            old.close()
+        # Prime the new client: heartbeat first (so the first get() is the state
+        # snapshot), then housekeeping frames so the device syncs clock/owner.
+        if self.hub:
+            c.put(self.hub.build_heartbeat())
+        off = time.localtime().tm_gmtoff or 0
+        c.put({"time": [int(time.time()), off]})
+        c.put({"cmd": "owner", "name": self.owner})
+        return c
+
+    def detach(self, c):
+        with self.lock:
+            if self.client is c:
+                self.client = None
+                self._last_sig = None
+
+    def send(self, hb):
+        # Same dedup + floor rule as the old RelayTransport: skip identical
+        # heartbeats, but always retransmit after KEEPALIVE_FLOOR_SEC so the
+        # firmware never sees >30s silence.
+        now = time.monotonic()
+        sig = (hb["total"], hb["running"], hb["waiting"], hb.get("tokens"),
+               hb.get("msg"), (hb.get("prompt") or {}).get("id"),
+               hash(tuple(hb.get("entries", []))))
+        with self.lock:
+            if sig == self._last_sig and (now - self._last_sent) < KEEPALIVE_FLOOR_SEC:
+                return
+            self._last_sig, self._last_sent = sig, now
+            c = self.client
+        if c is not None:
+            c.put(hb)
 
 
 class RelayTransport:
