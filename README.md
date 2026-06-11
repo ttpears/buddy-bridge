@@ -1,5 +1,10 @@
 # buddy-bridge
 
+[![CI](https://github.com/ttpears/buddy-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/ttpears/buddy-bridge/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ttpears/buddy-bridge?sort=semver)](https://github.com/ttpears/buddy-bridge/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/ttpears/buddy-bridge)](LICENSE)
+[![Firmware](https://img.shields.io/badge/firmware-ttpears%2Fclaude--desktop--buddy-orange)](https://github.com/ttpears/claude-desktop-buddy)
+
 See your Claude **CLI** sessions from every machine on one **M5StickC Plus**
 "Hardware Buddy" — busy/idle, permission prompts, and **approve/deny tool calls
 with the stick's A/B buttons**, including prompts raised on a remote box. A web
