@@ -24,6 +24,7 @@
         android:allowBackup="false"
         android:label="Buddy Bridge"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.BuddyBridge">
 
         <activity

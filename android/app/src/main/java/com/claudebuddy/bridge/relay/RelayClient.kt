@@ -65,10 +65,13 @@ class RelayClient(
                 setRequestProperty("Content-Type", "application/json")
                 if (token.isNotEmpty()) setRequestProperty("X-Buddy-Token", token)
             }
-            val body = JSONObject().put("id", id).put("decision", decision).toString()
-            conn.outputStream.use { it.write(body.toByteArray()) }
-            conn.inputStream.use { it.readBytes() }
-            conn.disconnect()
+            try {
+                val body = JSONObject().put("id", id).put("decision", decision).toString()
+                conn.outputStream.use { it.write(body.toByteArray()) }
+                conn.inputStream.use { it.readBytes() }
+            } finally {
+                conn.disconnect()
+            }
         } catch (e: Exception) { Log.i(TAG, "button POST failed: ${e.message}") }
     }
 }
