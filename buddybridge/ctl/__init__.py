@@ -33,6 +33,8 @@ def _client_install(args):
         cfg["hub"] = args.hub.rstrip("/")
     cfg.setdefault("hub", "http://127.0.0.1:8787")
     cfg["machine"] = args.name or cfg.get("machine") or socket.gethostname().split(".")[0]
+    if args.token is not None:
+        cfg["token"] = args.token        # shared secret, sent as X-Buddy-Token
     config.save_config(cfg)
     cmd = hooks.install(str(_claude_settings_path()))
     print(f"client installed: machine={cfg['machine']}  hub={cfg['hub']}")
@@ -49,10 +51,17 @@ def _client_uninstall(args):
 
 # ---- hub ---------------------------------------------------------------- #
 def _hub_install(args):
+    # Token goes in the config file (read by the hub at startup), not the
+    # ExecStart line — keeps the secret out of `ps`/the unit file.
+    if args.token is not None:
+        cfg = config.load_config()
+        cfg["token"] = args.token
+        config.save_config(cfg)
     exec_cmd = (f'"{_python_for_service()}" -m buddybridge.hub '
                 f'--port {args.port} --transport {args.transport} --owner {args.owner}')
     services.register("buddyhub", exec_cmd, "Claude Buddy hub")
-    print(f"hub installed (transport={args.transport}, port={args.port}, owner={args.owner}).")
+    auth = "token-authed" if (args.token or config.load_config().get("token")) else "no auth"
+    print(f"hub installed (transport={args.transport}, port={args.port}, owner={args.owner}, {auth}).")
 
 
 def _hub_uninstall(args):
@@ -115,6 +124,7 @@ def main(argv=None):
     pci.add_argument("--hub", help="hub URL (default http://127.0.0.1:8787)")
     pci.add_argument("--name", help="display name (default: hostname)")
     pci.add_argument("--tunnel", help="SSH host to forward-tunnel the hub through (Task 6)")
+    pci.add_argument("--token", help="shared secret sent as X-Buddy-Token (must match the hub)")
     pci.set_defaults(func=_client_install)
     pcs.add_parser("uninstall").set_defaults(func=_client_uninstall)
     pcs.add_parser("status").set_defaults(func=_status)
@@ -125,6 +135,7 @@ def main(argv=None):
     phi.add_argument("--port", type=int, default=8787)
     phi.add_argument("--transport", default="relay", choices=["relay", "mock"])
     phi.add_argument("--owner", default="you", help="name shown on the device/dashboard")
+    phi.add_argument("--token", help="require this shared secret as X-Buddy-Token on writes")
     phi.set_defaults(func=_hub_install)
     phs.add_parser("uninstall").set_defaults(func=_hub_uninstall)
 
