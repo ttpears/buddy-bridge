@@ -63,9 +63,10 @@ def _hub_uninstall(args):
 
 # ---- relay -------------------------------------------------------------- #
 def _relay_install(args):
-    exec_cmd = f'"{_python_for_service()}" -m buddybridge.relay --hub {args.hub}'
+    hub = args.hub or config.load_config().get("hub") or "http://127.0.0.1:8787"
+    exec_cmd = f'"{_python_for_service()}" -m buddybridge.relay --hub {hub}'
     services.register("buddy-relay", exec_cmd, "Claude Buddy BLE relay")
-    print("relay installed.")
+    print(f"relay installed (hub {hub}).")
 
 
 def _relay_uninstall(args):
@@ -76,7 +77,7 @@ def _relay_uninstall(args):
 def _relay_pair(args):
     """Run the relay in the foreground so you can enter the BLE passkey."""
     from buddybridge import relay
-    relay.main(["--console", "--hub", args.hub])
+    relay.main(["--console"] + (["--hub", args.hub] if args.hub else []))
 
 
 # ---- status ------------------------------------------------------------- #
@@ -121,11 +122,11 @@ def main(argv=None):
     pr = sub.add_parser("relay", help="drive the stick over Bluetooth")
     prs = pr.add_subparsers(dest="action", required=True)
     pri = prs.add_parser("install")
-    pri.add_argument("--hub", default="127.0.0.1:8790")
+    pri.add_argument("--hub", default=None)
     pri.set_defaults(func=_relay_install)
     prs.add_parser("uninstall").set_defaults(func=_relay_uninstall)
     prp = prs.add_parser("pair")
-    prp.add_argument("--hub", default="127.0.0.1:8790")
+    prp.add_argument("--hub", default=None)
     prp.set_defaults(func=_relay_pair)
 
     sub.add_parser("status", help="show what this machine runs").set_defaults(func=_status)
