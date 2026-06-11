@@ -125,9 +125,10 @@ async def relay_once(hub, token, name_prefix, scan_timeout, do_pair, pair_timeou
                 except json.JSONDecodeError:
                     continue
                 if msg.get("cmd") == "permission":
-                    loop.run_in_executor(None, post_button, hub, token,
-                                         {"id": msg.get("id", ""),
-                                          "decision": msg.get("decision", "deny")})
+                    payload = {"id": msg.get("id", ""),
+                               "decision": msg.get("decision", "deny")}
+                    loop.call_soon_threadsafe(
+                        loop.run_in_executor, None, post_button, hub, token, payload)
 
         deadline = loop.time() + pair_timeout
         while True:
