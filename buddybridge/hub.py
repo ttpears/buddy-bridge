@@ -20,13 +20,14 @@ HTTP API (hooks POST here):
   POST /permission  {machine, session, tool, hint}      -> {"id": "<prompt id>"}
   GET  /decision?id=<id>   long-poll -> {"decision": "once"|"deny"|"timeout"}
   GET  /state       debug snapshot
+  GET  /relay/stream   chunked newline-JSON heartbeats -> the BLE relay
+  POST /button      {id?, decision}   A/B decision from the relay/device/web
 """
 import argparse
 import hmac
 import json
 import os
 import queue
-import socket
 import sys
 import threading
 import time
@@ -389,105 +390,6 @@ class HttpRelayTransport:
             c.put(hb)
 
 
-class RelayTransport:
-    """TCP bridge to the Windows-side BLE relay. Heartbeats go out as JSON
-    lines (the relay writes them to the stick's Nordic UART RX); the stick's
-    lines (button-press permission decisions) come back and resolve prompts.
-    One relay connects at a time; reconnects are handled."""
-    def __init__(self, port=8790, owner="there"):
-        self.hub = None
-        self.port = port
-        self.owner = owner
-        self.conn = None
-        self.lock = threading.Lock()
-        self._last_sig = None    # dedup: skip sending identical heartbeats
-        self._last_sent = 0.0    # monotonic time of last actual send
-        threading.Thread(target=self._serve, daemon=True).start()
-
-    def _serve(self):
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind(("0.0.0.0", self.port))      # reachable from the Windows relay
-        srv.listen(1)
-        print(f"relay transport: waiting for BLE relay on 0.0.0.0:{self.port}")
-        while True:
-            conn, _ = srv.accept()
-            with self.lock:
-                old, self.conn = self.conn, conn
-            if old is not None:               # a reconnecting relay (e.g. after a
-                self._drop(old)               # device reboot) takes over the stale one
-            print(f"[{time.strftime('%H:%M:%S')}] relay connected")
-            self._on_connect()
-            threading.Thread(target=self._reader, args=(conn,), daemon=True).start()
-
-    @staticmethod
-    def _drop(conn):
-        for op in (lambda: conn.shutdown(socket.SHUT_RDWR), conn.close):
-            try:
-                op()
-            except OSError:
-                pass
-
-    def _on_connect(self):
-        off = time.localtime().tm_gmtoff or 0
-        self._raw({"time": [int(time.time()), off]})
-        self._raw({"cmd": "owner", "name": self.owner})
-        if self.hub:
-            self._raw(self.hub.build_heartbeat())
-
-    def send(self, hb):
-        # Skip sending if the heartbeat is identical to the last one —
-        # avoids waking the BLE radio for duplicate idle keepalives.
-        # But always retransmit after KEEPALIVE_FLOOR_SEC so the firmware
-        # never sees >30s silence and marks itself disconnected.
-        now = time.monotonic()
-        sig = (hb["total"], hb["running"], hb["waiting"], hb.get("tokens"),
-               hb.get("msg"), (hb.get("prompt") or {}).get("id"),
-               hash(tuple(hb.get("entries", []))))
-        if sig == self._last_sig and (now - self._last_sent) < KEEPALIVE_FLOOR_SEC:
-            return
-        self._last_sig, self._last_sent = sig, now
-        self._raw(hb)
-
-    def _raw(self, obj):
-        line = (json.dumps(obj) + "\n").encode()
-        with self.lock:
-            if self.conn:
-                try:
-                    self.conn.sendall(line)
-                except OSError:
-                    self.conn = None
-
-    def _reader(self, conn):
-        buf = b""
-        try:
-            while True:
-                chunk = conn.recv(4096)
-                if not chunk:
-                    break
-                buf += chunk
-                while b"\n" in buf:
-                    line, buf = buf.split(b"\n", 1)
-                    self._handle(line)
-        except OSError:
-            pass
-        finally:
-            with self.lock:
-                if self.conn is conn:         # only clear if a newer relay
-                    self.conn = None          # hasn't already taken over
-            self._drop(conn)
-            print(f"[{time.strftime('%H:%M:%S')}] relay disconnected")
-
-    def _handle(self, line):
-        try:
-            msg = json.loads(line)
-        except json.JSONDecodeError:
-            return
-        if msg.get("cmd") == "permission" and self.hub:
-            ok = self.hub.resolve(msg.get("id", ""), msg.get("decision", "deny"))
-            print(f"[{time.strftime('%H:%M:%S')}] device decision "
-                  f"{msg.get('decision')} for {msg.get('id')} -> {'ok' if ok else 'stale'}")
-
 
 # --------------------------------------------------------------------------- #
 # HTTP server                                                                   #
@@ -623,7 +525,6 @@ def main():
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument("--bind", default="0.0.0.0")
     ap.add_argument("--transport", choices=["mock", "relay"], default="mock")
-    ap.add_argument("--relay-port", type=int, default=8790)
     ap.add_argument("--owner", default="there")
     ap.add_argument("--token", default=None,
                     help="shared secret; require a matching X-Buddy-Token header on "
@@ -638,7 +539,7 @@ def main():
         token = _config.load_config().get("token", "")
 
     if args.transport == "relay":
-        transport = RelayTransport(port=args.relay_port, owner=args.owner)
+        transport = HttpRelayTransport(owner=args.owner)
     else:
         transport = MockTransport()
     hub = Hub(transport)
