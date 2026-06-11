@@ -1,10 +1,12 @@
 package com.claudebuddy.bridge.service
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
@@ -31,7 +33,10 @@ class BuddyService : Service() {
     }
 
     private val binder = LocalBinder()
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        Log.e(TAG, "coroutine crash (service stays alive): ${throwable.message}")
+    }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + exceptionHandler)
 
     private var hub: Hub? = null
     private var bleManager: BleManager? = null
@@ -58,6 +63,18 @@ class BuddyService : Service() {
 
     @SuppressLint("ForegroundServiceType")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // On API 34+ startForeground requires BLUETOOTH_CONNECT at call time.
+        // If the service was restarted by START_STICKY without an activity to
+        // prompt, the permission may not be granted — bail quietly instead of
+        // crashing in a loop.
+        if (Build.VERSION.SDK_INT >= 31 &&
+            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.w(TAG, "BLUETOOTH_CONNECT not granted, deferring service start")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         // Build foreground notification
         val pendingIntent = PendingIntent.getActivity(
             this, 0,
@@ -80,10 +97,7 @@ class BuddyService : Service() {
                 startForeground(NOTIF_ID, notification)
             }
         } catch (e: Exception) {
-            // API 34+: SecurityException if BLUETOOTH_CONNECT not granted yet.
-            // Stop self instead of crashing — START_STICKY would restart us in
-            // a crash loop otherwise ("app keeps stopping" dialog).
-            Log.e(TAG, "startForeground failed (missing permission?): ${e.message}")
+            Log.e(TAG, "startForeground failed: ${e.message}")
             stopSelf()
             return START_NOT_STICKY
         }

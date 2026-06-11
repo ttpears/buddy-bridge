@@ -17,6 +17,9 @@
     <!-- HTTP server needs network -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Battery optimization exemption so the service survives Doze -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
     <application
