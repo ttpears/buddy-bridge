@@ -107,8 +107,14 @@ async def relay_once(host, port, name_prefix, scan_timeout, do_pair, pair_timeou
                 if not line:
                     logging.info("hub closed the connection")
                     break
-                for i in range(0, len(line), mtu):
-                    await client.write_gatt_char(NUS_RX, line[i:i + mtu], response=False)
+                chunks = [line[i:i + mtu] for i in range(0, len(line), mtu)]
+                for idx, chunk in enumerate(chunks):
+                    await client.write_gatt_char(NUS_RX, chunk, response=False)
+                    # Small pause between chunks lets the BLE radio flush each
+                    # packet instead of queuing a burst — reduces peak current
+                    # draw on the device and avoids dropped notifications.
+                    if idx < len(chunks) - 1:
+                        await asyncio.sleep(0.005)
     finally:
         writer.close()
         try:

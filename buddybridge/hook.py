@@ -14,6 +14,7 @@ a dead bridge must never block you.
 Config (env):
   BUDDY_HUB      hub base URL          (default http://127.0.0.1:8787)
   BUDDY_MACHINE  name shown on device  (default: hostname)
+  BUDDY_TOKEN    shared secret for hub auth (optional, must match hub/app)
 
 Wire it up (per event) as:
   {"type":"command","command":"python3 -m buddybridge.hook","timeout":60}
@@ -46,10 +47,21 @@ def resolve_machine():
             or socket.gethostname().split(".")[0])
 
 
+def resolve_token():
+    """Shared secret for hub auth: env override > config file > none."""
+    return (os.environ.get("BUDDY_TOKEN")
+            or _config.load_config().get("token")
+            or "")
+
+
 def post(path, payload, timeout):
+    headers = {"Content-Type": "application/json"}
+    token = resolve_token()
+    if token:
+        headers["X-Buddy-Token"] = token
     req = urllib.request.Request(resolve_hub() + path,
                                  data=json.dumps(payload).encode(),
-                                 headers={"Content-Type": "application/json"},
+                                 headers=headers,
                                  method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read() or b"{}")
@@ -60,11 +72,29 @@ def get(path, timeout):
         return json.loads(r.read() or b"{}")
 
 
-def fire(kind, session, msg=None):
+def count_tokens(transcript_path):
+    """Sum input+output tokens from the session transcript file."""
+    if not transcript_path:
+        return None
+    try:
+        total = 0
+        with open(transcript_path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    u = json.loads(line).get("message", {}).get("usage", {})
+                    total += u.get("input_tokens", 0) + u.get("output_tokens", 0)
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+        return total or None
+    except OSError:
+        return None
+
+
+def fire(kind, session, msg=None, tokens=None):
     """Best-effort session event; never raises."""
     try:
         post("/event", {"machine": resolve_machine(), "session": session,
-                        "kind": kind, "msg": msg}, QUICK)
+                        "kind": kind, "msg": msg, "tokens": tokens}, QUICK)
     except Exception:
         pass
 
@@ -123,17 +153,20 @@ def main():
 
     evt = data.get("hook_event_name", "")
     session = data.get("session_id", "?")
+    transcript = data.get("transcript_path")
 
     if evt == "SessionStart":
         fire("session_start", session)
     elif evt == "SessionEnd":
         fire("session_end", session)
     elif evt == "UserPromptSubmit":
-        fire("running", session, snip(data.get("prompt") or "") or "thinking…")
+        fire("running", session, snip(data.get("prompt") or "") or "thinking…",
+             tokens=count_tokens(transcript))
     elif evt == "Stop":
-        fire("idle", session)
+        fire("idle", session, tokens=count_tokens(transcript))
     elif evt == "PostToolUse":
-        fire("tool_done", session, tool_label(data.get("tool_name", ""), data.get("tool_input")))
+        fire("tool_done", session, tool_label(data.get("tool_name", ""), data.get("tool_input")),
+             tokens=count_tokens(transcript))
     elif evt in ("PermissionRequest", "PreToolUse"):
         # ---- the control path (opt-in per session) ----
         # PermissionRequest fires ONLY on genuine prompts (preferred wiring);

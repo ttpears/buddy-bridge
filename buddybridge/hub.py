@@ -32,9 +32,13 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-KEEPALIVE_SEC = 10          # heartbeat keepalive cadence (REFERENCE: ~10s)
+KEEPALIVE_ACTIVE_SEC = 10   # heartbeat cadence when sessions are active
+KEEPALIVE_IDLE_SEC = 20     # heartbeat cadence when nothing is happening
+KEEPALIVE_FLOOR_SEC = 20    # always retransmit after this long, even if unchanged
+                            # (must be < firmware's 30s disconnect window)
 DECISION_TIMEOUT_SEC = 30   # how long a PreToolUse hook waits before fallback
-STALE_SESSION_SEC = 1800    # reap an idle session only after this long (30 min)
+STALE_SESSION_SEC = 300     # reap an idle session only after this long (5 min)
+STALE_RUNNING_SEC = 1800    # running sessions get a longer leash (30 min)
 PROMPT_TTL = 90             # drop an unanswered/orphaned prompt after this long
 
 
@@ -75,6 +79,11 @@ class Hub:
                 self.sessions.setdefault(key, {"status": "idle", "msg": "", "ts": 0, "tokens": 0})
             elif kind == "session_end":
                 self.sessions.pop(key, None)
+                # Purge entries from this session's machine so the device
+                # doesn't keep showing stale transcript lines from dead sessions.
+                self.entries = deque(
+                    (e for e in self.entries if not e.startswith(f"{machine} ▸")),
+                    maxlen=8)
             else:
                 s = self.sessions.setdefault(key, {"status": "idle", "msg": "", "ts": 0, "tokens": 0})
                 if kind == "running":
@@ -161,9 +170,19 @@ class Hub:
     def build_heartbeat(self):
         with self.lock:
             now = time.monotonic()
+            reaped = set()
             for k, s in list(self.sessions.items()):
-                if now - s["ts"] > STALE_SESSION_SEC:
+                limit = STALE_RUNNING_SEC if s["status"] == "running" else STALE_SESSION_SEC
+                if now - s["ts"] > limit:
+                    reaped.add(k[0])   # machine name
                     del self.sessions[k]
+            # Clear entries from reaped machines so stale transcript lines
+            # don't linger on the device indefinitely.
+            if reaped:
+                self.entries = deque(
+                    (e for e in self.entries
+                     if not any(e.startswith(f"{m} ▸") for m in reaped)),
+                    maxlen=8)
             # reap orphaned prompts (hook died mid-poll, etc.) so the device
             # can never latch its alert indefinitely
             for pid, p in list(self.by_id.items()):
@@ -224,7 +243,12 @@ class Hub:
             fired = self._dirty.wait(timeout=1.0)
             self._dirty.clear()
             now = time.monotonic()
-            if fired or (now - last) >= KEEPALIVE_SEC:
+            # Adaptive keepalive: fast when sessions are active (prompt
+            # responsiveness matters), slow when idle (saves device battery).
+            with self.lock:
+                active = bool(self.sessions)
+            interval = KEEPALIVE_ACTIVE_SEC if active else KEEPALIVE_IDLE_SEC
+            if fired or (now - last) >= interval:
                 self.transport.send(self.build_heartbeat())
                 last = now
 
@@ -236,15 +260,19 @@ class MockTransport:
     """Prints heartbeats to the console; reads a/d from stdin as A/B buttons."""
     def __init__(self):
         self.hub = None
-        self._last = None
+        self._last_sig = None
+        self._last_sent = 0.0
 
     def send(self, hb):
-        # only redraw when something meaningful changed
-        sig = (hb["total"], hb["running"], hb["waiting"], hb.get("msg"),
-               hb.get("prompt", {}).get("id") if hb.get("prompt") else None)
-        if sig == self._last:
+        # only redraw when something meaningful changed — but always retransmit
+        # after KEEPALIVE_FLOOR_SEC so the firmware never times out
+        now = time.monotonic()
+        sig = (hb["total"], hb["running"], hb["waiting"], hb.get("tokens"),
+               hb.get("msg"), (hb.get("prompt") or {}).get("id"),
+               hash(tuple(hb.get("entries", []))))
+        if sig == self._last_sig and (now - self._last_sent) < KEEPALIVE_FLOOR_SEC:
             return
-        self._last = sig
+        self._last_sig, self._last_sent = sig, now
         state = self._state_name(hb)
         line = (f"[{time.strftime('%H:%M:%S')}] {state:9s} "
                 f"total={hb['total']} running={hb['running']} waiting={hb['waiting']} "
@@ -295,6 +323,8 @@ class RelayTransport:
         self.owner = owner
         self.conn = None
         self.lock = threading.Lock()
+        self._last_sig = None    # dedup: skip sending identical heartbeats
+        self._last_sent = 0.0    # monotonic time of last actual send
         threading.Thread(target=self._serve, daemon=True).start()
 
     def _serve(self):
@@ -329,6 +359,17 @@ class RelayTransport:
             self._raw(self.hub.build_heartbeat())
 
     def send(self, hb):
+        # Skip sending if the heartbeat is identical to the last one —
+        # avoids waking the BLE radio for duplicate idle keepalives.
+        # But always retransmit after KEEPALIVE_FLOOR_SEC so the firmware
+        # never sees >30s silence and marks itself disconnected.
+        now = time.monotonic()
+        sig = (hb["total"], hb["running"], hb["waiting"], hb.get("tokens"),
+               hb.get("msg"), (hb.get("prompt") or {}).get("id"),
+               hash(tuple(hb.get("entries", []))))
+        if sig == self._last_sig and (now - self._last_sent) < KEEPALIVE_FLOOR_SEC:
+            return
+        self._last_sig, self._last_sent = sig, now
         self._raw(hb)
 
     def _raw(self, obj):
