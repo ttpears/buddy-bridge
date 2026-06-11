@@ -68,7 +68,12 @@ def post(path, payload, timeout):
 
 
 def get(path, timeout):
-    with urllib.request.urlopen(resolve_hub() + path, timeout=timeout) as r:
+    headers = {}
+    token = resolve_token()
+    if token:
+        headers["X-Buddy-Token"] = token
+    req = urllib.request.Request(resolve_hub() + path, headers=headers, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read() or b"{}")
 
 

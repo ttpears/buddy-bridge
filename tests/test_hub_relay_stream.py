@@ -128,3 +128,16 @@ def test_token_gates_stream_and_reads():
         resp.close()
     finally:
         srv.shutdown()
+
+
+def test_decision_reachable_with_token_header():
+    h, srv, port = _serve(token="secret")
+    try:
+        # mirrors hook.get(): X-Buddy-Token header on a GET /decision long-poll.
+        # unknown id returns immediately with "timeout" (not 401).
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/decision?id=nope&wait=0",
+                                     headers={"X-Buddy-Token": "secret"}, method="GET")
+        body = json.loads(urllib.request.urlopen(req, timeout=3).read())
+        assert body["decision"] == "timeout"
+    finally:
+        srv.shutdown()
