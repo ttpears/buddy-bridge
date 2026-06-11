@@ -104,19 +104,23 @@ class BleManager(
         writeJob?.cancel()
         writeJob = scope.launch {
             for (chunk in writeQueue) {
-                val char = rxChar ?: continue
-                val g = gatt ?: continue
-                if (Build.VERSION.SDK_INT >= 33) {
-                    g.writeCharacteristic(
-                        char, chunk, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-                    )
-                } else {
-                    @Suppress("DEPRECATION")
-                    char.value = chunk
-                    @Suppress("DEPRECATION")
-                    char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-                    @Suppress("DEPRECATION")
-                    g.writeCharacteristic(char)
+                try {
+                    val char = rxChar ?: continue
+                    val g = gatt ?: continue
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        g.writeCharacteristic(
+                            char, chunk, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                        )
+                    } else {
+                        @Suppress("DEPRECATION")
+                        char.value = chunk
+                        @Suppress("DEPRECATION")
+                        char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                        @Suppress("DEPRECATION")
+                        g.writeCharacteristic(char)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "BLE write failed (continuing): ${e.message}")
                 }
                 delay(INTER_CHUNK_DELAY_MS)
             }
