@@ -156,7 +156,10 @@ buddyctl status
 - `install` is idempotent; `uninstall` removes only what buddyctl added.
 - **Auth:** set `BUDDY_TOKEN` (env, or `"token"` in the config file) and the hook
   sends it as an `X-Buddy-Token` header. Required when the hub is exposed over a
-  network. It must match the token configured on the hub.
+  network. It must match the token configured on the hub. With a token set every
+  route is gated — including the dashboard, so open it as
+  `http://HUBHOST:8787/?token=YOUR_TOKEN` (the hub also accepts the token on the
+  `?token=` query for browsers and the BLE relay stream).
 
 ---
 
