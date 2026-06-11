@@ -106,6 +106,10 @@ buddyctl status
   saved to a per-machine config (`~/.config/buddybridge/config.json`, or `%APPDATA%`
   on Windows) that the hook reads — so the same install works on every OS.
 - `install` is idempotent; `uninstall` removes only what buddyctl added.
+- **Optional auth:** set `BUDDY_TOKEN` (env, or `"token"` in the config file) and the
+  hook sends it as an `X-Buddy-Token` header. Useful when the hub is reachable over a
+  network (e.g. the Android app below) rather than just localhost. It must match the
+  token configured on whatever is serving the hub.
 
 ---
 
@@ -128,6 +132,32 @@ and Approve/Deny buttons — the bridge is fully usable with no stick at all.
 2. Wake the stick; confirm Bluetooth is on (hold A → settings → bluetooth).
 3. `buddyctl relay pair` — enter the 6-digit passkey the stick shows. The relay
    holds that passkey on screen for 60s while you type it.
+
+---
+
+## Android bridge app (alternative to the relay machine)
+
+Instead of running `buddyhub` + `buddy-relay` on a desk machine, the `android/`
+app folds both into a single phone app: it talks BLE to the stick and serves the
+same hub HTTP API on port `8787`. Point your hooks at the phone
+(`BUDDY_HUB=http://<phone-ip>:8787`, typically over Tailscale/VPN) and set a
+matching `BUDDY_TOKEN` on both sides. Build a debug APK via the
+`.github/workflows/build-apk.yml` workflow (or `./gradlew assembleDebug` in
+`android/`). This replaces the WSL-hub-plus-Windows-relay topology when you'd
+rather the bridge live on a phone that's always with you.
+
+## Windows clients
+
+For a Windows machine running `claude`, two `.cmd` wrappers avoid hand-setting
+env vars each time:
+
+- `buddy-hook.cmd` — wraps the hook; set `BUDDY_HUB` (and `BUDDY_TOKEN`) at the top.
+- `buddy.cmd` — launches Claude Code with `BUDDY_CONTROL=1` (the Windows analog of
+  the `buddy` launcher).
+
+If the package is installed via pip/pipx, `buddyctl client install` already wires
+hooks and registers a Startup launcher — use the `.cmd` files for the
+quick/manual case (e.g. pointing a laptop at the Android hub).
 
 ---
 
