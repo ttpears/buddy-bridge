@@ -14,6 +14,8 @@ object SettingsKeys {
     val HTTP_PORT = intPreferencesKey("http_port")
     val DEVICE_PREFIX = stringPreferencesKey("device_prefix")
     val BUDDY_TOKEN = stringPreferencesKey("buddy_token")
+    val MODE = stringPreferencesKey("mode")                 // "serve_hub" | "relay"
+    val REMOTE_HUB_URL = stringPreferencesKey("remote_hub_url")
 }
 
 class SettingsRepository(private val context: Context) {
@@ -34,6 +36,9 @@ class SettingsRepository(private val context: Context) {
         prefs[SettingsKeys.BUDDY_TOKEN] ?: ""
     }
 
+    val mode: Flow<String> = context.dataStore.data.map { it[SettingsKeys.MODE] ?: "serve_hub" }
+    val remoteHubUrl: Flow<String> = context.dataStore.data.map { it[SettingsKeys.REMOTE_HUB_URL] ?: "" }
+
     suspend fun setOwnerName(name: String) {
         context.dataStore.edit { it[SettingsKeys.OWNER_NAME] = name }
     }
@@ -48,5 +53,12 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setBuddyToken(token: String) {
         context.dataStore.edit { it[SettingsKeys.BUDDY_TOKEN] = token }
+    }
+
+    suspend fun setMode(mode: String) {
+        context.dataStore.edit { it[SettingsKeys.MODE] = mode }
+    }
+    suspend fun setRemoteHubUrl(url: String) {
+        context.dataStore.edit { it[SettingsKeys.REMOTE_HUB_URL] = url }
     }
 }
