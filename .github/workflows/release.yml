@@ -1,0 +1,43 @@
+name: Release
+
+# Cut a GitHub release whenever a vX.Y.Z tag is pushed: build the debug APK,
+# checksum it, and attach both with auto-generated notes.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          mkdir -p ~/.android && cp debug.keystore ~/.android/debug.keystore
+          chmod +x gradlew && ./gradlew assembleDebug
+
+      - name: Stage assets + checksums
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/debug/app-debug.apk \
+             "dist/buddy-bridge-${GITHUB_REF_NAME}-debug.apk"
+          (cd dist && sha256sum * > SHA256SUMS)
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "buddy-bridge $GITHUB_REF_NAME" \
+            --generate-notes \
+            --notes "Android bridge app (debug-signed) + SHA256SUMS. Sideload \`buddy-bridge-${GITHUB_REF_NAME}-debug.apk\`; the stable debug keystore lets updates install over the top. See the README for hub/relay/buddyctl setup."
