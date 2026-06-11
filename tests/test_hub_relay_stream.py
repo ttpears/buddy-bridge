@@ -51,6 +51,8 @@ def test_transport_attach_displaces_old_client():
     c1 = t.attach()
     c2 = t.attach()                 # newer relay takes over
     assert c1.closed is True
+    for _ in range(3):
+        c2.get(timeout=1)           # drain priming frames (time, owner, heartbeat)
     t.send({"total": 0, "running": 0, "waiting": 0, "tokens": 0, "entries": []})
     # closed client never receives further frames; current one does
     assert c2.get(timeout=1)["total"] == 0

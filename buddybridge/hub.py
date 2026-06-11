@@ -356,13 +356,14 @@ class HttpRelayTransport:
             self._last_sig = None       # force a full heartbeat to the newcomer
         if old is not None:
             old.close()
-        # Prime the new client: heartbeat first (so the first get() is the state
-        # snapshot), then housekeeping frames so the device syncs clock/owner.
-        if self.hub:
-            c.put(self.hub.build_heartbeat())
+        # Prime the new client in canonical on-connect order (matches
+        # RelayTransport._on_connect and Android BuddyService.onBleConnected):
+        # time first so the firmware clock is set, then owner, then heartbeat.
         off = time.localtime().tm_gmtoff or 0
         c.put({"time": [int(time.time()), off]})
         c.put({"cmd": "owner", "name": self.owner})
+        if self.hub:
+            c.put(self.hub.build_heartbeat())
         return c
 
     def detach(self, c):
