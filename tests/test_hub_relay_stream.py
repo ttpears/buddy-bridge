@@ -69,3 +69,62 @@ def test_transport_send_dedups_until_floor():
     assert c.get(timeout=1)["tokens"] == 5
     t.send(dict(hb))                # identical -> deduped, nothing enqueued
     assert c.empty()
+
+
+import json
+import threading
+import urllib.request
+import urllib.error
+
+from http.server import ThreadingHTTPServer
+
+
+def _serve(token=""):
+    t = hubmod.HttpRelayTransport(owner="me")
+    h = hubmod.Hub(t)
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), hubmod.make_handler(h, token))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    threading.Thread(target=h.run, daemon=True).start()
+    return h, srv, srv.server_address[1]
+
+
+def test_relay_stream_delivers_frames_and_button_resolves():
+    h, srv, port = _serve()
+    try:
+        resp = urllib.request.urlopen(f"http://127.0.0.1:{port}/relay/stream", timeout=3)
+        first = json.loads(resp.readline())          # primed "time" frame
+        assert "time" in first
+        # raise a prompt; a heartbeat with the prompt should stream out
+        pid = h.register_permission("box", "s1", "Bash", "ls -la")
+        prompt = None
+        for _ in range(20):
+            obj = json.loads(resp.readline())
+            if obj.get("prompt"):
+                prompt = obj["prompt"]; break
+        assert prompt and prompt["id"] == pid
+        # approve via /button
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/button",
+            data=json.dumps({"id": pid, "decision": "once"}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        assert json.loads(urllib.request.urlopen(req, timeout=3).read())["ok"] is True
+        resp.close()
+    finally:
+        srv.shutdown()
+
+
+def test_token_gates_stream_and_reads():
+    h, srv, port = _serve(token="secret")
+    try:
+        for path in ("/relay/stream", "/decision?id=x", "/detail", "/state", "/"):
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=3)
+                assert False, f"{path} should require a token"
+            except urllib.error.HTTPError as e:
+                assert e.code == 401
+        # query-string token is accepted for the stream
+        resp = urllib.request.urlopen(f"http://127.0.0.1:{port}/relay/stream?token=secret", timeout=3)
+        assert "time" in json.loads(resp.readline())
+        resp.close()
+    finally:
+        srv.shutdown()

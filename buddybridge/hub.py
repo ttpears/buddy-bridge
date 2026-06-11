@@ -333,7 +333,7 @@ class StreamClient:
 
     def close(self):
         self.closed = True
-        self._q.put(None)            # sentinel unblocks a waiting writer
+        self._q.put(None)            # sentinel unblocks a waiting reader
 
 
 class HttpRelayTransport:
@@ -512,16 +512,17 @@ def resolve_button(hub, data):
 
 def make_handler(hub, token=""):
     class H(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
         def log_message(self, *a):       # quiet
             pass
 
         def _authed(self):
-            # Empty token = auth disabled (local-only use). Otherwise require a
-            # matching X-Buddy-Token header, compared in constant time. Mirrors
-            # the Android hub so the same hook/BUDDY_TOKEN works against either.
             if not token:
                 return True
             provided = self.headers.get("X-Buddy-Token", "")
+            if not provided:
+                provided = (parse_qs(urlparse(self.path).query).get("token") or [""])[0]
             return hmac.compare_digest(provided, token)
 
         def _json(self, code, obj):
@@ -562,7 +563,11 @@ def make_handler(hub, token=""):
             return self._json(404, {"ok": False, "error": "no route"})
 
         def do_GET(self):
+            if not self._authed():
+                return self._json(401, {"ok": False, "error": "unauthorized"})
             u = urlparse(self.path)
+            if u.path == "/relay/stream":
+                return self._stream()
             if u.path in ("/", "/dashboard"):
                 body = DASHBOARD_HTML.encode()
                 self.send_response(200)
@@ -585,6 +590,31 @@ def make_handler(hub, token=""):
             if u.path == "/state":
                 return self._json(200, hub.build_heartbeat())
             return self._json(404, {"ok": False})
+
+        def _stream(self):
+            transport = hub.transport
+            if not hasattr(transport, "attach"):
+                return self._json(404, {"ok": False, "error": "no relay transport"})
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            client = transport.attach()
+            try:
+                while True:
+                    obj = client.get(timeout=KEEPALIVE_FLOOR_SEC)
+                    if obj is None:           # displaced by a newer relay
+                        break
+                    chunk = (json.dumps(obj) + "\n").encode()
+                    self.wfile.write(f"{len(chunk):X}\r\n".encode())
+                    self.wfile.write(chunk)
+                    self.wfile.write(b"\r\n")
+                    self.wfile.flush()
+            except (queue.Empty, BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                transport.detach(client)
     return H
 
 
