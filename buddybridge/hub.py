@@ -22,7 +22,9 @@ HTTP API (hooks POST here):
   GET  /state       debug snapshot
 """
 import argparse
+import hmac
 import json
+import os
 import socket
 import sys
 import threading
@@ -423,10 +425,19 @@ except (OSError, ModuleNotFoundError):
 
 
 
-def make_handler(hub):
+def make_handler(hub, token=""):
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):       # quiet
             pass
+
+        def _authed(self):
+            # Empty token = auth disabled (local-only use). Otherwise require a
+            # matching X-Buddy-Token header, compared in constant time. Mirrors
+            # the Android hub so the same hook/BUDDY_TOKEN works against either.
+            if not token:
+                return True
+            provided = self.headers.get("X-Buddy-Token", "")
+            return hmac.compare_digest(provided, token)
 
         def _json(self, code, obj):
             body = json.dumps(obj).encode()
@@ -446,6 +457,8 @@ def make_handler(hub):
                 return {}
 
         def do_POST(self):
+            if not self._authed():
+                return self._json(401, {"ok": False, "error": "unauthorized"})
             path = urlparse(self.path).path
             data = self._read()
             if path == "/event":
@@ -498,7 +511,17 @@ def main():
     ap.add_argument("--transport", choices=["mock", "relay"], default="mock")
     ap.add_argument("--relay-port", type=int, default=8790)
     ap.add_argument("--owner", default="there")
+    ap.add_argument("--token", default=None,
+                    help="shared secret; require a matching X-Buddy-Token header on "
+                         "write requests (/event, /permission, /button). Defaults to "
+                         "$BUDDY_TOKEN or the per-machine config; empty = auth off.")
     args = ap.parse_args()
+
+    # token: explicit flag > $BUDDY_TOKEN > config file > "" (auth disabled)
+    token = args.token if args.token is not None else os.environ.get("BUDDY_TOKEN")
+    if token is None:
+        from buddybridge import config as _config
+        token = _config.load_config().get("token", "")
 
     if args.transport == "relay":
         transport = RelayTransport(port=args.relay_port, owner=args.owner)
@@ -506,11 +529,12 @@ def main():
         transport = MockTransport()
     hub = Hub(transport)
 
-    srv = ThreadingHTTPServer((args.bind, args.port), make_handler(hub))
+    srv = ThreadingHTTPServer((args.bind, args.port), make_handler(hub, token))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     threading.Thread(target=hub.run, daemon=True).start()
 
-    print(f"buddyhub listening on {args.bind}:{args.port}  ({args.transport} transport)")
+    auth = "token-authed" if token else "no auth"
+    print(f"buddyhub listening on {args.bind}:{args.port}  ({args.transport} transport, {auth})")
     if args.transport == "mock" and sys.stdin.isatty():
         print("  type  a = approve   d = deny   s = state   q = quit")
         transport.input_loop()
