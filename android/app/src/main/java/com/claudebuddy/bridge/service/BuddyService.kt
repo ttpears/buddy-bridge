@@ -143,12 +143,22 @@ class BuddyService : Service() {
     }
 
     private fun sendHeartbeat(hb: JSONObject) {
-        if (!dedup.isDifferent(hb)) {
-            Log.d(TAG, "heartbeat deduped, skipping")
-            return
+        try {
+            if (!dedup.isDifferent(hb)) {
+                Log.d(TAG, "heartbeat deduped, skipping")
+                return
+            }
+            val ble = bleManager
+            if (ble == null) {
+                dedup.reset()  // don't let dedup cache a heartbeat that was never sent
+                return
+            }
+            Log.i(TAG, "sending heartbeat: ${hb.toString().take(100)}")
+            ble.sendJson(hb.toString())
+        } catch (e: Exception) {
+            Log.e(TAG, "sendHeartbeat error (heartbeat loop stays alive): ${e.message}")
+            dedup.reset()  // allow retry on next cycle
         }
-        Log.i(TAG, "sending heartbeat: ${hb.toString().take(100)}")
-        bleManager?.sendJson(hb.toString())
     }
 
     private fun onBleConnected() {
