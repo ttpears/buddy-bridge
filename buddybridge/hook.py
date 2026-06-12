@@ -54,6 +54,11 @@ def resolve_token():
             or "")
 
 
+def is_paused():
+    """Reporting paused from the tray app? Then the hook stays silent (fail-open)."""
+    return bool(_config.load_config().get("paused"))
+
+
 def post(path, payload, timeout):
     headers = {"Content-Type": "application/json"}
     token = resolve_token()
@@ -151,6 +156,8 @@ def emit_decision(event, behavior, reason="via buddy"):
 
 
 def main():
+    if is_paused():
+        sys.exit(0)                               # paused from the tray: stay silent
     try:
         data = json.load(sys.stdin)
     except Exception:

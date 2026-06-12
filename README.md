@@ -292,18 +292,27 @@ on macOS — the same single command as Linux, WSL, and Windows. No extra steps.
 
 ## 🪟 Windows clients
 
-For a Windows machine running `claude`, two `.cmd` wrappers avoid hand-setting
-env vars each time:
+No Python, no pip, no CLI — just a small app.
 
-- `buddy-hook.cmd` — wraps the hook; set `BUDDY_HUB` (and `BUDDY_TOKEN`) at the top.
-- `buddy.cmd` — launches Claude Code with `BUDDY_CONTROL=1` (the Windows analog of
-  the `buddy` launcher).
+1. Download **`buddy-bridge-win64.zip`** from the
+   [Releases](https://github.com/ttpears/buddy-bridge/releases/latest) page and
+   unzip it anywhere.
+2. Run **`buddy.exe`**. A setup window asks for your **hub URL**, **token**, and
+   this machine's **name**; click **Connect**.
 
-If the package is installed via pip/pipx, `buddyctl client install` already wires
-hooks and registers a Startup launcher — use the `.cmd` files for the quick/manual
-case. The hook reads hub URL and token from `%APPDATA%\buddybridge\config.json`
-(same config written by `buddyctl client install`), so the `.cmd` fallback and the
-managed service share settings.
+That's it. It wires the Claude Code hooks, installs itself to a stable per-user
+spot so the download folder is disposable, and lives in the **system tray** —
+showing connection status, with **Settings**, **Pause reporting**, and
+**Remove** (uninstall) in its menu. It starts automatically at login.
+
+The tray app is monitor + config only; approvals stay on the stick or the web
+dashboard. The exe is also the hook (`buddy.exe hook`), which posts straight to
+the hub — so reporting keeps working even if you close the tray app. Settings
+live in `%APPDATA%\buddybridge\config.json`, the same config the other roles use.
+
+> Prefer the CLI? `pipx install` + `buddyctl client install` still works on
+> Windows exactly like the other platforms — the tray app is just the
+> no-Python path.
 
 ## 🩺 Troubleshooting
 
