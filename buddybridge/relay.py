@@ -32,6 +32,9 @@ LOCK_PORT = 8791
 LOGFILE = _config.config_dir() / "relay.log"
 _lock = None
 
+HEARTBEAT_TIMEOUT = 45.0   # no hub line for this long -> reconnect (stream watchdog)
+BLE_WRITE_TIMEOUT = 5.0    # a single BLE write blocking this long -> reconnect
+
 
 def single_instance():
     global _lock
@@ -149,18 +152,31 @@ async def relay_once(hub, token, name_prefix, scan_timeout, do_pair, pair_timeou
         loop.run_in_executor(None, reader_thread, resp)
         logging.info("subscribed; relaying")
         mtu = (client.mtu_size - 3) if getattr(client, "mtu_size", 0) else 20
+        delivered = 0
         try:
             while True:
-                line = await lines.get()
+                try:
+                    line = await asyncio.wait_for(lines.get(), timeout=HEARTBEAT_TIMEOUT)
+                except asyncio.TimeoutError:
+                    logging.info("no hub data in %ss — reconnecting", HEARTBEAT_TIMEOUT)
+                    break
                 if line is None:
                     logging.info("hub stream closed")
                     break
                 payload = (line + "\n").encode()
                 chunks = [payload[i:i + mtu] for i in range(0, len(payload), mtu)]
+                # Acknowledged writes (response=True): WinRT write-without-response
+                # silently flow-control-hangs after the first packet, which left the
+                # firmware with only the clock set and an otherwise-asleep pet.
                 for idx, chunk in enumerate(chunks):
-                    await client.write_gatt_char(NUS_RX, chunk, response=False)
+                    await asyncio.wait_for(
+                        client.write_gatt_char(NUS_RX, chunk, response=True),
+                        timeout=BLE_WRITE_TIMEOUT)
                     if idx < len(chunks) - 1:
                         await asyncio.sleep(0.005)
+                delivered += 1
+                if delivered == 1:
+                    logging.info("first heartbeat delivered to the stick")
         finally:
             try:
                 resp.close()
