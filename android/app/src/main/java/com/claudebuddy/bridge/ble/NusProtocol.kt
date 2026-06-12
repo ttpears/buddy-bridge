@@ -99,4 +99,10 @@ class HeartbeatDedup {
         lastSentMs = now
         return true
     }
+
+    /** Clear cached state so the next heartbeat is always sent. */
+    fun reset() {
+        lastSig = null
+        lastSentMs = 0L
+    }
 }

@@ -1,14 +1,18 @@
 package com.claudebuddy.bridge
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -65,6 +69,7 @@ class MainActivity : ComponentActivity() {
 
         settings = SettingsRepository(applicationContext)
         requestPermissions()
+        requestBatteryOptExemption()
 
         setContent {
             BuddyBridgeTheme {
@@ -217,6 +222,21 @@ class MainActivity : ComponentActivity() {
         }
         if (needed.isNotEmpty()) {
             permissionLauncher.launch(needed.toTypedArray())
+        }
+    }
+
+    @SuppressLint("BatteryLife")
+    private fun requestBatteryOptExemption() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            try {
+                startActivity(intent)
+            } catch (e: Exception) {
+                Log.w("MainActivity", "battery opt exemption request failed: ${e.message}")
+            }
         }
     }
 }
