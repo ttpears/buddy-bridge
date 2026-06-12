@@ -1,5 +1,6 @@
 package com.claudebuddy.bridge.ble
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.*
 import android.bluetooth.le.*
@@ -7,6 +8,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.ParcelUuid
 import android.util.Log
@@ -60,6 +62,12 @@ class BleManager(
     private val adapter: BluetoothAdapter?
         get() = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
 
+    private fun hasBlePermission(): Boolean {
+        if (Build.VERSION.SDK_INT < 31) return true
+        return context.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+               context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+    }
+
     fun start(scope: CoroutineScope) {
         this.scope = scope
         connectJob = scope.launch { supervisionLoop() }
@@ -96,19 +104,23 @@ class BleManager(
         writeJob?.cancel()
         writeJob = scope.launch {
             for (chunk in writeQueue) {
-                val char = rxChar ?: continue
-                val g = gatt ?: continue
-                if (Build.VERSION.SDK_INT >= 33) {
-                    g.writeCharacteristic(
-                        char, chunk, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-                    )
-                } else {
-                    @Suppress("DEPRECATION")
-                    char.value = chunk
-                    @Suppress("DEPRECATION")
-                    char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-                    @Suppress("DEPRECATION")
-                    g.writeCharacteristic(char)
+                try {
+                    val char = rxChar ?: continue
+                    val g = gatt ?: continue
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        g.writeCharacteristic(
+                            char, chunk, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                        )
+                    } else {
+                        @Suppress("DEPRECATION")
+                        char.value = chunk
+                        @Suppress("DEPRECATION")
+                        char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                        @Suppress("DEPRECATION")
+                        g.writeCharacteristic(char)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "BLE write failed (continuing): ${e.message}")
                 }
                 delay(INTER_CHUNK_DELAY_MS)
             }
@@ -132,6 +144,10 @@ class BleManager(
     }
 
     private suspend fun connectOnce() {
+        if (!hasBlePermission()) {
+            Log.w(TAG, "BLE permissions not granted, skipping connect cycle")
+            return
+        }
         // Scan
         _state.value = BleState.SCANNING
         val device = scan() ?: run {
