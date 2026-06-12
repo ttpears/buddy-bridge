@@ -38,6 +38,24 @@ def test_dispatch_routes_tray(monkeypatch):
     assert calls == ["tray"]
 
 
+def test_dispatch_routes_relay(monkeypatch):
+    import buddybridge.relay as relay
+    calls = []
+    monkeypatch.setattr(relay, "main", lambda argv: calls.append(("relay", argv)))
+    winapp.dispatch(["buddy.exe", "relay", "--no-pair"])
+    assert calls == [("relay", ["--no-pair"])]
+
+
+def test_relay_argv_exe(monkeypatch):
+    monkeypatch.setattr(winapp, "current_exe", lambda: r"C:\x\buddy.exe")
+    assert winapp.relay_argv() == [r"C:\x\buddy.exe", "relay"]
+
+
+def test_relay_argv_source(monkeypatch):
+    monkeypatch.setattr(winapp, "current_exe", lambda: None)
+    assert winapp.relay_argv()[1:] == ["-m", "buddybridge.relay"]
+
+
 def test_relocate_bundle_copies_then_noops(monkeypatch, tmp_path):
     src = tmp_path / "download"
     (src / "_internal").mkdir(parents=True)

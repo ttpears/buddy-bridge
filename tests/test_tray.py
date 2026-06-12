@@ -25,6 +25,19 @@ def test_hooks_installed(monkeypatch, tmp_path):
     assert tray.hooks_installed() is True
 
 
+def test_drive_flag_starts_and_stops_relay(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "config_path", lambda: tmp_path / "config.json")
+    calls = []
+    monkeypatch.setattr(tray, "start_relay", lambda: calls.append("start"))
+    monkeypatch.setattr(tray, "stop_relay", lambda: calls.append("stop"))
+    assert tray.is_driving() is False
+    assert tray.stick_status() == "Stick: off"
+    tray.set_driving(True)
+    assert tray.is_driving() is True and calls == ["start"]
+    tray.set_driving(False)
+    assert tray.is_driving() is False and calls == ["start", "stop"]
+
+
 def test_save_settings_and_pause(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "config_path", lambda: tmp_path / "config.json")
     tray.save_settings("https://h.example.com/", "tok", "box")

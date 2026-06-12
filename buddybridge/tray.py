@@ -16,6 +16,8 @@ logic here imports fine on a headless box (and under pytest).
 """
 import json
 import socket
+import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -27,6 +29,9 @@ from buddybridge.ctl import hooks as _hooks, services as _services
 
 POLL_SECONDS = 5
 STARTUP_NAME = "buddy-tray"
+
+# managed BLE relay subprocess ("drive the stick from this PC")
+_relay = {"proc": None}
 
 
 # ---- pure logic (unit-tested) ------------------------------------------- #
@@ -152,6 +157,55 @@ def open_dashboard():
     webbrowser.open(url)
 
 
+# ---- BLE relay ("drive the stick from this PC") ------------------------- #
+
+def relay_running():
+    p = _relay["proc"]
+    return p is not None and p.poll() is None
+
+
+def start_relay():
+    if relay_running():
+        return
+    from buddybridge import winapp
+    kwargs = {}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = 0x08000000          # CREATE_NO_WINDOW
+    try:
+        _relay["proc"] = subprocess.Popen(winapp.relay_argv(), **kwargs)
+    except Exception:
+        _relay["proc"] = None
+
+
+def stop_relay():
+    p = _relay["proc"]
+    if p is not None and p.poll() is None:
+        p.terminate()
+        try:
+            p.wait(timeout=5)
+        except Exception:
+            p.kill()
+    _relay["proc"] = None
+
+
+def is_driving():
+    """Persisted intent to relay the stick from this machine."""
+    return bool(_config.load_config().get("relay"))
+
+
+def set_driving(on):
+    cfg = _config.load_config()
+    cfg["relay"] = bool(on)
+    _config.save_config(cfg)
+    start_relay() if on else stop_relay()
+
+
+def stick_status():
+    if not is_driving():
+        return "Stick: off"
+    return "Stick: driving" if relay_running() else "Stick: starting…"
+
+
 # ---- GUI shell (lazy imports; manual-smoke on Windows) ------------------ #
 
 def _icon_image(color):
@@ -267,6 +321,23 @@ def main():
             except Exception:
                 pass
 
+    def show_drive_help():
+        from tkinter import messagebox
+        messagebox.showinfo(
+            "buddy-bridge",
+            "Driving the stick from this PC.\n\n"
+            "• Wake the stick and make sure its Bluetooth is on.\n"
+            "• If Windows asks to pair, enter the 6-digit code shown on the stick.\n"
+            "• If the Claude desktop app holds the stick, Forget it there first\n"
+            "  (Developer → Hardware Buddy → Forget).",
+            parent=root)
+
+    def toggle_drive():
+        on = not is_driving()
+        set_driving(on)
+        if on:
+            on_main(show_drive_help)
+
     menu = pystray.Menu(
         pystray.MenuItem(lambda *a: status["label"], None, enabled=False),
         pystray.Menu.SEPARATOR,
@@ -279,6 +350,11 @@ def main():
         pystray.MenuItem("Pause reporting",
                          lambda *a: _act(lambda: set_paused(not is_paused())),
                          checked=lambda *a: is_paused()),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem(lambda *a: stick_status(), None, enabled=False),
+        pystray.MenuItem("Drive stick from this PC",
+                         lambda *a: _act(toggle_drive),
+                         checked=lambda *a: is_driving()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", lambda *a: (icon.stop(), on_main(root.destroy))),
     )
@@ -305,6 +381,8 @@ def main():
     threading.Thread(target=poll, daemon=True).start()
     threading.Thread(target=icon.run, daemon=True).start()
     root.after(100, pump)
+    if is_driving():
+        start_relay()                                # resume driving the stick
     if not _config.load_config():
         on_main(show_settings, True)                 # first run: open setup
 
@@ -315,6 +393,7 @@ def main():
             icon.stop()
         except Exception:
             pass
+        stop_relay()
         lock.close()
 
 

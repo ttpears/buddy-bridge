@@ -19,7 +19,7 @@ jobs:
           python-version: "3.12"
       - name: Build buddy.exe (onedir) with PyInstaller
         run: |
-          pip install -e ".[gui]" pyinstaller
+          pip install -e ".[gui,relay]" pyinstaller
           pyinstaller packaging/buddy.spec
       - name: Zip the onedir bundle
         shell: pwsh

@@ -29,6 +29,14 @@ def hook_command(exe=None):
     return f'"{sys.executable}" -m buddybridge.hook'
 
 
+def relay_argv():
+    """Argv list to run the BLE relay: the frozen exe or `python -m`."""
+    exe = current_exe()
+    if exe:
+        return [exe, "relay"]
+    return [sys.executable, "-m", "buddybridge.relay"]
+
+
 def install_dir():
     """Stable per-user home for the bundle (no admin, no installer)."""
     base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
@@ -87,6 +95,9 @@ def dispatch(argv):
         _ensure_stdout()
         from buddybridge import hook
         return hook.main()
+    if len(argv) > 1 and argv[1] == "relay":
+        from buddybridge import relay
+        return relay.main(argv[2:])
     from buddybridge import tray
     return tray.main()
 
