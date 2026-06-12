@@ -18,6 +18,10 @@ relay.log
 relay.log.*
 *.lock
 
+# Superpowers scratch (plans/specs) — local only, not tracked
+.superpowers/
+docs/superpowers/
+
 # Tooling / previews
 /tmp/
 tty_sheet.gif
