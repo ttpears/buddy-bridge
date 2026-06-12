@@ -9,6 +9,10 @@ dist/
 venv/
 env/
 
+# Secrets — never commit a real deploy env (it holds BUDDY_TOKEN)
+.env
+deploy/.env
+
 # Relay runtime artifacts
 relay.log
 relay.log.*
