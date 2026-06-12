@@ -16,6 +16,31 @@ buddy-bridge speaks the same protocol but sourced from Claude Code hook events
 across any number of machines. **Independent, unofficial — not affiliated with,
 endorsed by, or supported by Anthropic.**
 
+**Contents:** [Quickstart](#quickstart) · [Roles](#one-mental-model-roles) · [Which setup is mine?](#which-setup-is-mine) · [Install](#install) · [`buddyctl` reference](#buddyctl-reference) · [Daily use](#daily-use) · [Pairing](#pairing-the-stick-one-time-relay-machine) · [Android app](#android-bridge-app-alternative-to-the-relay-machine) · [macOS](#macos-clients) · [Windows](#windows-clients) · [Troubleshooting](#troubleshooting) · [Develop](#develop)
+
+---
+
+## Quickstart
+
+The common case — **one machine that has a Bluetooth radio, plus a stick.** Other
+setups (more machines, a phone, a public hub) are in
+[Which setup is mine?](#which-setup-is-mine).
+
+1. **Flash the stick.** Grab the firmware image from
+   [claude-desktop-buddy Releases](https://github.com/ttpears/claude-desktop-buddy/releases/latest)
+   and flash it (steps in that repo's README).
+2. **Install the bridge** on the box with the Bluetooth radio:
+   ```bash
+   pipx install "buddy-bridge[relay] @ git+https://github.com/ttpears/buddy-bridge"
+   buddyctl hub install && buddyctl relay install && buddyctl client install
+   buddyctl relay pair      # type the 6-digit code the stick shows
+   ```
+3. **Use it.** Open the dashboard at `http://localhost:8787`, and start
+   stick-controlled sessions with `buddy` (plain `claude` stays ambient-only).
+
+That's the whole loop. Adding more machines is one `buddyctl client install` each —
+see [Install](#install).
+
 ---
 
 ## One mental model: roles
