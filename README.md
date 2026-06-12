@@ -16,7 +16,16 @@ buddy-bridge speaks the same protocol but sourced from Claude Code hook events
 across any number of machines. **Independent, unofficial — not affiliated with,
 endorsed by, or supported by Anthropic.**
 
-**Contents:** [Quickstart](#quickstart) · [Roles](#one-mental-model-roles) · [Which setup is mine?](#which-setup-is-mine) · [Install](#install) · [`buddyctl` reference](#buddyctl-reference) · [Daily use](#daily-use) · [Pairing](#pairing-the-stick-one-time-relay-machine) · [Android app](#android-bridge-app-alternative-to-the-relay-machine) · [macOS](#macos-clients) · [Windows](#windows-clients) · [Troubleshooting](#troubleshooting) · [Develop](#develop)
+**Contents**
+
+- [Quickstart](#quickstart)
+- [Which setup is mine?](#which-setup-is-mine)
+- [Install](#install) & [`buddyctl` reference](#buddyctl-reference)
+- [Daily use](#daily-use) & [pairing the stick](#pairing-the-stick-one-time-relay-machine)
+- [Android bridge app](#android-bridge-app-alternative-to-the-relay-machine)
+- [macOS](#macos-clients) & [Windows](#windows-clients) clients
+- [Troubleshooting](#troubleshooting)
+- [Develop](#develop)
 
 ---
 
