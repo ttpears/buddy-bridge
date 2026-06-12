@@ -5,10 +5,14 @@ with no POSIX env-prefix, so it runs on Windows cmd too; hub/machine come from
 buddybridge.config (written by `buddyctl client install`).
 """
 import json
+import re
 import sys
 from pathlib import Path
 
 AMBIENT = ["SessionStart", "SessionEnd", "UserPromptSubmit", "Stop"]
+
+# The frozen Windows app wires its hook as `"...\buddy.exe" hook`; match that too.
+_EXE_HOOK = re.compile(r'buddy\.exe"?\s+hook\b', re.IGNORECASE)
 
 
 def _entries(command):
@@ -24,7 +28,8 @@ def _entries(command):
 
 def _is_buddy(entry):
     return any(("buddybridge.hook" in h.get("command", "")) or
-               ("buddy-hook.py" in h.get("command", ""))
+               ("buddy-hook.py" in h.get("command", "")) or
+               _EXE_HOOK.search(h.get("command", ""))
                for h in entry.get("hooks", []))
 
 
@@ -50,9 +55,13 @@ def _strip_buddy(hooks, keep_events):
             del hooks[event]
 
 
-def install(settings_path, python=None):
-    """Idempotently merge buddy hooks; preserves any non-buddy hooks. Returns the command."""
-    command = f'"{python or sys.executable}" -m buddybridge.hook'
+def install(settings_path, python=None, command=None):
+    """Idempotently merge buddy hooks; preserves any non-buddy hooks. Returns the command.
+
+    `command` overrides the baked hook command (e.g. the frozen Windows app passes
+    `"...\\buddy.exe" hook`); otherwise it's `"<python>" -m buddybridge.hook`.
+    """
+    command = command or f'"{python or sys.executable}" -m buddybridge.hook'
     data = _load(settings_path)
     hooks = data.setdefault("hooks", {})
     entries = _entries(command)

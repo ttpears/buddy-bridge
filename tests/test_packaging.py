@@ -24,7 +24,8 @@ def test_character_assets_packaged():
 
 
 def test_runnable_modules_expose_main():
-    for name in ("buddybridge.relay", "buddybridge.hook", "buddybridge.launcher"):
+    for name in ("buddybridge.relay", "buddybridge.hook", "buddybridge.launcher",
+                 "buddybridge.winapp", "buddybridge.tray"):
         mod = importlib.import_module(name)
         assert callable(mod.main), f"{name}.main missing"
 
@@ -50,7 +51,7 @@ def test_launcher_sets_control_env(monkeypatch):
 
 def test_entry_point_scripts_resolve():
     # After `pip install -e .` these console scripts must exist on PATH.
-    for script in ("buddyctl", "buddyhub", "buddy-relay", "buddy", "build-tty"):
+    for script in ("buddyctl", "buddyhub", "buddy-relay", "buddy", "buddy-tray", "build-tty"):
         assert shutil.which(script), f"{script} not on PATH (did `pip install -e .` run?)"
 
 

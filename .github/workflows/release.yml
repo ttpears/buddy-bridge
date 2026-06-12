@@ -1,7 +1,7 @@
 name: Release
 
-# Cut a GitHub release whenever a vX.Y.Z tag is pushed: build the debug APK,
-# checksum it, and attach both with auto-generated notes.
+# Cut a GitHub release whenever a vX.Y.Z tag is pushed: build the debug APK and
+# the Windows tray app, checksum everything, and attach with auto-generated notes.
 on:
   push:
     tags: ["v*"]
@@ -10,7 +10,27 @@ permissions:
   contents: write
 
 jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build buddy.exe (onedir) with PyInstaller
+        run: |
+          pip install -e ".[gui]" pyinstaller
+          pyinstaller packaging/buddy.spec
+      - name: Zip the onedir bundle
+        shell: pwsh
+        run: Compress-Archive -Path dist/buddy/* -DestinationPath "buddy-bridge-${env:GITHUB_REF_NAME}-win64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: buddy-bridge-*-win64.zip
+
   release:
+    needs: build-windows
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,9 +46,14 @@ jobs:
           mkdir -p ~/.android && cp debug.keystore ~/.android/debug.keystore
           chmod +x gradlew && ./gradlew assembleDebug
 
+      - name: Download Windows zip
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-zip
+          path: dist
+
       - name: Stage assets + checksums
         run: |
-          mkdir -p dist
           cp android/app/build/outputs/apk/debug/app-debug.apk \
              "dist/buddy-bridge-${GITHUB_REF_NAME}-debug.apk"
           (cd dist && sha256sum * > SHA256SUMS)
@@ -40,4 +65,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/* \
             --title "buddy-bridge $GITHUB_REF_NAME" \
             --generate-notes \
-            --notes "Android bridge app (debug-signed) + SHA256SUMS. Sideload \`buddy-bridge-${GITHUB_REF_NAME}-debug.apk\`; the stable debug keystore lets updates install over the top. See the README for hub/relay/buddyctl setup."
+            --notes "Windows tray app (\`buddy-bridge-${GITHUB_REF_NAME}-win64.zip\` — unzip, run \`buddy.exe\`) and the Android bridge app (debug-signed), plus SHA256SUMS. See the README for setup."

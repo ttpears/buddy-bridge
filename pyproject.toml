@@ -15,6 +15,7 @@ dependencies = []
 [project.optional-dependencies]
 relay = ["bleak>=0.21"]
 tty = ["Pillow>=10.0"]
+gui = ["pystray>=0.19", "Pillow>=10.0"]
 dev = ["pytest>=7.0"]
 
 [project.scripts]
@@ -22,6 +23,7 @@ buddyctl = "buddybridge.ctl:main"
 buddyhub = "buddybridge.hub:main"
 buddy-relay = "buddybridge.relay:main"
 buddy = "buddybridge.launcher:main"
+buddy-tray = "buddybridge.winapp:main"
 build-tty = "buddybridge.build_tty:main"
 
 [tool.setuptools]
