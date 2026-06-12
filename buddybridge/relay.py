@@ -27,7 +27,9 @@ NUS_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"   # write   host -> device
 NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"   # notify  device -> host
 
 LOCK_PORT = 8791
-LOGFILE = Path(__file__).resolve().parent / "relay.log"
+# In the config dir (writable on every OS) — NOT next to the module, which is
+# read-only / non-existent inside a frozen PyInstaller bundle.
+LOGFILE = _config.config_dir() / "relay.log"
 _lock = None
 
 
@@ -44,6 +46,7 @@ def single_instance():
 
 
 def setup_logging(console):
+    LOGFILE.parent.mkdir(parents=True, exist_ok=True)
     handlers = [logging.handlers.RotatingFileHandler(
         LOGFILE, maxBytes=512 * 1024, backupCount=1, encoding="utf-8")]
     if console:
