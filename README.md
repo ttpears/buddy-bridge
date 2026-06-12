@@ -72,6 +72,24 @@ Android app) from here, and the two halves meet over Bluetooth.
 
 ---
 
+## Which setup is mine?
+
+Pick the row that matches you, then jump to the matching section below.
+
+| Your situation | What to set up |
+| -------------- | -------------- |
+| One machine that has the Bluetooth radio **and** the stick | **Recipe 1** — `hub` + `relay` + `client` on that one box |
+| Several machines feeding one stick | **Recipe 2** — stand up a `hub` once, then `client install` on each machine |
+| The stick rides on your **phone** (no desktop Bluetooth, or you're mobile) | **[Android app](#android-bridge-app-alternative-to-the-relay-machine)**, *Relay to remote hub* mode — phone drives BLE and dials out to your hub |
+| Your **phone is the whole rig** (hub + stick in one) | **[Android app](#android-bridge-app-alternative-to-the-relay-machine)**, *Serve hub here* mode — point machines at `http://<phone-ip>:8787` |
+| The hub must be reachable **over the internet** | Front the hub with **[Traefik](#deploying-the-hub-behind-traefik)** (automatic TLS) |
+| **No stick at all** | Any hub — drive it from the web **dashboard's** Approve/Deny buttons |
+
+Most people are one of the first two rows. Everything else just changes *where the
+relay lives* (a desktop box, or the phone) and *how machines reach the hub*.
+
+---
+
 ## Install
 
 One `pipx` package, one command (`buddyctl`), on every OS. `buddyctl` registers
