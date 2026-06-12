@@ -18,22 +18,20 @@ endorsed by, or supported by Anthropic.**
 
 **Contents**
 
-- [Quickstart](#quickstart)
-- [Which setup is mine?](#which-setup-is-mine)
-- [Install](#install) & [`buddyctl` reference](#buddyctl-reference)
-- [Daily use](#daily-use) & [pairing the stick](#pairing-the-stick-one-time-relay-machine)
-- [Android bridge app](#android-bridge-app-alternative-to-the-relay-machine)
-- [macOS](#macos-clients) & [Windows](#windows-clients) clients
-- [Troubleshooting](#troubleshooting)
-- [Develop](#develop)
+- [Quickstart](#-quickstart)
+- [Which setup is mine?](#-which-setup-is-mine)
+- [Install](#-install) & [`buddyctl` reference](#-buddyctl-reference)
+- [Daily use](#-daily-use) & [pairing the stick](#-pairing-the-stick-one-time-relay-machine)
+- [Android bridge app](#-android-bridge-app-alternative-to-the-relay-machine)
+- [Linux](#-linux-clients), [macOS](#-macos-clients) & [Windows](#-windows-clients) clients
+- [Troubleshooting](#-troubleshooting)
+- [Develop](#-develop)
 
----
-
-## Quickstart
+## 🚀 Quickstart
 
 The common case — **one machine that has a Bluetooth radio, plus a stick.** Other
 setups (more machines, a phone, a public hub) are in
-[Which setup is mine?](#which-setup-is-mine).
+[Which setup is mine?](#-which-setup-is-mine).
 
 1. **Flash the stick.** Grab the firmware image from
    [claude-desktop-buddy Releases](https://github.com/ttpears/claude-desktop-buddy/releases/latest)
@@ -48,11 +46,9 @@ setups (more machines, a phone, a public hub) are in
    stick-controlled sessions with `buddy` (plain `claude` stays ambient-only).
 
 That's the whole loop. Adding more machines is one `buddyctl client install` each —
-see [Install](#install).
+see [Install](#-install).
 
----
-
-## One mental model: roles
+## 🧩 One mental model: roles
 
 Every machine plays one or more roles; `buddyctl` sets them up:
 
@@ -83,9 +79,7 @@ nothing but the hub needs to be reachable from the internet.
 > (closing the window isn't enough — its bridge auto-reconnects in the background).
 > Without the app running this never comes up.
 
----
-
-## Repositories & releases
+## 📚 Repositories & releases
 
 Two repos make up the project, plus the upstream they descend from:
 
@@ -104,9 +98,7 @@ Android app) from here, and the two halves meet over Bluetooth.
 > **Unofficial & independent** — not affiliated with, endorsed by, or supported
 > by Anthropic. The firmware fork tracks `anthropics/claude-desktop-buddy`.
 
----
-
-## Which setup is mine?
+## 🧭 Which setup is mine?
 
 Pick the row that matches you, then jump to the matching section below.
 
@@ -114,17 +106,15 @@ Pick the row that matches you, then jump to the matching section below.
 | -------------- | -------------- |
 | One machine that has the Bluetooth radio **and** the stick | **Recipe 1** — `hub` + `relay` + `client` on that one box |
 | Several machines feeding one stick | **Recipe 2** — stand up a `hub` once, then `client install` on each machine |
-| The stick rides on your **phone** (no desktop Bluetooth, or you're mobile) | **[Android app](#android-bridge-app-alternative-to-the-relay-machine)**, *Relay to remote hub* mode — phone drives BLE and dials out to your hub |
-| Your **phone is the whole rig** (hub + stick in one) | **[Android app](#android-bridge-app-alternative-to-the-relay-machine)**, *Serve hub here* mode — point machines at `http://<phone-ip>:8787` |
-| The hub must be reachable **over the internet** | Front the hub with **[Traefik](#deploying-the-hub-behind-traefik)** (automatic TLS) |
+| The stick rides on your **phone** (no desktop Bluetooth, or you're mobile) | **[Android app](#-android-bridge-app-alternative-to-the-relay-machine)**, *Relay to remote hub* mode — phone drives BLE and dials out to your hub |
+| Your **phone is the whole rig** (hub + stick in one) | **[Android app](#-android-bridge-app-alternative-to-the-relay-machine)**, *Serve hub here* mode — point machines at `http://<phone-ip>:8787` |
+| The hub must be reachable **over the internet** | Run a **[public hub](#public-hub-docker--traefik)** (Docker + Traefik, automatic TLS) |
 | **No stick at all** | Any hub — drive it from the web **dashboard's** Approve/Deny buttons |
 
 Most people are one of the first two rows. Everything else just changes *where the
 relay lives* (a desktop box, or the phone) and *how machines reach the hub*.
 
----
-
-## Install
+## 📦 Install
 
 One `pipx` package, one command (`buddyctl`), on every OS. `buddyctl` registers
 background services itself — a **Startup shortcut** on Windows, a `systemd --user`
@@ -158,8 +148,6 @@ buddyctl client install --hub https://buddy.<you>.<company>.<tld> --token YOUR_T
 
 It appears on the dashboard and stick immediately. `--name` defaults to the
 hostname. Restart any running `claude` session to load the hooks.
-
----
 
 ### Public hub (Docker + Traefik)
 
@@ -202,9 +190,7 @@ clients at the bare hub:
 buddyctl client install --hub http://HUBHOST:8787 --token YOUR_TOKEN
 ```
 
----
-
-## `buddyctl` reference
+## 📖 `buddyctl` reference
 
 ```
 buddyctl hub     install [--port --transport --owner] | uninstall
@@ -226,9 +212,7 @@ buddyctl status
   `http://HUBHOST:8787/?token=YOUR_TOKEN` (the hub also accepts the token on the
   `?token=` query for browsers and the BLE relay stream).
 
----
-
-## Daily use
+## 💻 Daily use
 
 ```bash
 buddy                 # a session whose approvals route to the stick (A/B)
@@ -239,18 +223,14 @@ claude                # normal session — ambient only (busy/idle), no intercep
 `BUDDY_CONTROL=1`). The **web dashboard** (`http://HUBHOST:8787/`) shows live state
 and Approve/Deny buttons — the bridge is fully usable with no stick at all.
 
----
-
-## Pairing the stick (one-time, relay machine)
+## 🔌 Pairing the stick (one-time, relay machine)
 
 1. If the Claude desktop app held the stick: **Developer → Hardware Buddy → Forget**.
 2. Wake the stick; confirm Bluetooth is on (hold A → settings → bluetooth).
 3. `buddyctl relay pair` — enter the 6-digit passkey the stick shows. The relay
    holds that passkey on screen for 60s while you type it.
 
----
-
-## Android bridge app (alternative to the relay machine)
+## 📱 Android bridge app (alternative to the relay machine)
 
 The `android/` app has two modes, selectable from a toggle in the UI:
 
@@ -283,12 +263,27 @@ The `android/` app has two modes, selectable from a toggle in the UI:
 > to `main` also builds the APK as a CI artifact, and tagging `vX.Y.Z` cuts a
 > Release with the APK attached automatically.
 
-## macOS clients
+## 🐧 Linux clients
+
+Linux (and WSL) is the baseline the recipes above already use:
+`buddyctl client install` registers a **`systemd --user`** unit, so the hook runs
+at login — same single command, nothing extra.
+
+```bash
+buddyctl client install --hub <URL> --token … --name workstation
+```
+
+> **WSL:** the hub usually lives elsewhere (a server, or the Windows side) — point
+> `--hub` at it, over Tailscale or a tunnel if it isn't directly reachable. The
+> `systemd --user` unit needs systemd enabled in WSL (`/etc/wsl.conf` →
+> `[boot]` `systemd=true`).
+
+## 🍎 macOS clients
 
 `buddyctl client install --hub <URL> --token …` registers a **launchd LaunchAgent**
 on macOS — the same single command as Linux, WSL, and Windows. No extra steps.
 
-## Windows clients
+## 🪟 Windows clients
 
 For a Windows machine running `claude`, two `.cmd` wrappers avoid hand-setting
 env vars each time:
@@ -303,9 +298,7 @@ case. The hook reads hub URL and token from `%APPDATA%\buddybridge\config.json`
 (same config written by `buddyctl client install`), so the `.cmd` fallback and the
 managed service share settings.
 
----
-
-## Troubleshooting
+## 🩺 Troubleshooting
 
 | Symptom | Cause / fix |
 | ------- | ----------- |
@@ -316,9 +309,7 @@ managed service share settings.
 | Relay never finds the stick | Desktop app still holds it (Forget it), or it isn't paired: `buddyctl relay pair`. |
 | `buddy-relay` says it needs Bluetooth | Install the extra: `pipx install "buddy-bridge[relay] @ git+…"`. |
 
----
-
-## Develop
+## 🔧 Develop
 
 ```bash
 git clone https://github.com/ttpears/buddy-bridge && cd buddy-bridge
@@ -334,9 +325,7 @@ character pack with `build-tty terra` (needs the `[tty]` extra).
 CI runs `pytest` on every PR (`main` is protected and requires it). Tagging
 `vX.Y.Z` builds and publishes the Android APK to Releases.
 
----
-
-## Credits
+## 🙌 Credits
 
 - **[@ToxicOrca](https://github.com/ToxicOrca)** — the **Android bridge app**,
   the bridge **battery optimizations** (adaptive heartbeat, heartbeat dedup,
