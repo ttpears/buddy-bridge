@@ -163,92 +163,159 @@ def _icon_image(color):
     return img
 
 
-def open_settings(on_saved=None, first_run=False):
-    """Modal-ish tkinter form for hub URL / token / machine; Connect wires it up."""
+def _single_instance_lock(port=49677):
+    """Hold a localhost socket so a second launch (login autostart + a manual
+    double-click) detects the first and exits. Returns the socket — keep a
+    reference for the process lifetime — or None if another instance owns it."""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", port))
+        s.listen(1)
+        return s
+    except OSError:
+        s.close()
+        return None
+
+
+def _settings_window(root, on_done=None, first_run=False):
+    """Build the hub/token/name form as a Toplevel on the Tk main thread."""
     import tkinter as tk
     from tkinter import messagebox
 
     cfg = _config.load_config()
-    root = tk.Tk()
-    root.title("buddy-bridge — setup" if first_run else "buddy-bridge — settings")
-    root.resizable(False, False)
+    win = tk.Toplevel(root)
+    win.title("buddy-bridge — setup" if first_run else "buddy-bridge — settings")
+    win.resizable(False, False)
     fields = {}
-    for i, (key, label, default) in enumerate([
-        ("hub", "Hub URL", cfg.get("hub", "http://127.0.0.1:8787")),
-        ("token", "Token", cfg.get("token", "")),
-        ("machine", "This machine's name", cfg.get("machine", resolve_machine())),
-    ]):
-        tk.Label(root, text=label).grid(row=i, column=0, sticky="e", padx=8, pady=6)
+    rows = [
+        ("hub", "Hub URL", cfg.get("hub", "http://127.0.0.1:8787"), None),
+        ("token", "Token", cfg.get("token", ""), "*"),
+        ("machine", "This machine's name", cfg.get("machine", resolve_machine()), None),
+    ]
+    for i, (key, label, default, show) in enumerate(rows):
+        tk.Label(win, text=label).grid(row=i, column=0, sticky="e", padx=8, pady=6)
         var = tk.StringVar(value=default)
-        show = "*" if key == "token" else None
-        tk.Entry(root, textvariable=var, width=40, show=show).grid(row=i, column=1, padx=8, pady=6)
+        tk.Entry(win, textvariable=var, width=44, show=show).grid(row=i, column=1, padx=8, pady=6)
         fields[key] = var
 
     def do_connect():
         hub = fields["hub"].get().strip()
         if not valid_hub_url(hub):
-            messagebox.showerror("buddy-bridge", "Enter a valid http(s) hub URL.")
+            messagebox.showerror("buddy-bridge", "Enter a valid http(s) hub URL.", parent=win)
             return
-        connect(hub, fields["token"].get().strip(), fields["machine"].get().strip())
-        if on_saved:
-            on_saved()
-        root.destroy()
+        try:
+            connect(hub, fields["token"].get().strip(), fields["machine"].get().strip())
+        except Exception as e:                       # surface failures, don't freeze
+            messagebox.showerror("buddy-bridge", f"Setup failed: {e}", parent=win)
+            return
+        if on_done:
+            on_done()
+        win.destroy()
 
-    btn = tk.Button(root, text="Connect" if first_run else "Save", command=do_connect)
-    btn.grid(row=3, column=0, columnspan=2, pady=10)
-    root.mainloop()
+    tk.Button(win, text="Connect" if first_run else "Save",
+              command=do_connect).grid(row=len(rows), column=0, columnspan=2, pady=10)
+    win.protocol("WM_DELETE_WINDOW", win.destroy)
+    win.lift()
+    win.focus_force()
+    return win
 
 
 def main():
+    import queue
+    import tkinter as tk
     import pystray
 
-    state = {"icon": None}
+    lock = _single_instance_lock()
+    if lock is None:
+        return                                       # another tray instance is running
 
-    def poll(icon):
-        while getattr(icon, "visible", True):
+    # tkinter MUST own the main thread; pystray runs on a background thread and
+    # marshals clicks back here through ui_q (tkinter isn't thread-safe).
+    root = tk.Tk()
+    root.withdraw()                                  # hidden root; UI is Toplevels
+    ui_q = queue.Queue()
+    win_ref = {"settings": None}
+    status = {"label": "starting…", "color": "grey", "hooks": hooks_installed()}
+
+    def pump():
+        try:
+            while True:
+                ui_q.get_nowait()()
+        except queue.Empty:
+            pass
+        root.after(100, pump)
+
+    def on_main(fn, *a):
+        ui_q.put(lambda: fn(*a))
+
+    def show_settings(first_run=False):
+        w = win_ref["settings"]
+        if w is not None and w.winfo_exists():
+            w.lift(); w.focus_force(); return
+        win_ref["settings"] = _settings_window(
+            root, on_done=lambda: status.update(hooks=hooks_installed()), first_run=first_run)
+
+    def _act(fn):
+        # run an action, refresh cached hook status, redraw the menu
+        try:
+            fn()
+        finally:
+            status["hooks"] = hooks_installed()
+            try:
+                icon.update_menu()
+            except Exception:
+                pass
+
+    menu = pystray.Menu(
+        pystray.MenuItem(lambda *a: status["label"], None, enabled=False),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Open dashboard…", lambda *a: open_dashboard()),
+        pystray.MenuItem("Settings…", lambda *a: on_main(show_settings, False)),
+        pystray.MenuItem(lambda *a: "Hooks: installed ✓" if status["hooks"] else "Hooks: not installed",
+                         None, enabled=False),
+        pystray.MenuItem("Reinstall hooks", lambda *a: _act(install_hooks)),
+        pystray.MenuItem("Remove (uninstall)", lambda *a: _act(uninstall)),
+        pystray.MenuItem("Pause reporting",
+                         lambda *a: _act(lambda: set_paused(not is_paused())),
+                         checked=lambda *a: is_paused()),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Quit", lambda *a: (icon.stop(), on_main(root.destroy))),
+    )
+    icon = pystray.Icon("buddy-bridge", _icon_image("grey"), "buddy-bridge", menu=menu)
+
+    def poll():
+        while True:
             st, reachable = fetch_state(resolve_hub(), resolve_token())
             label, color = summarize_state(st, reachable)
+            status["label"], status["hooks"] = label, hooks_installed()
             icon.title = f"buddy-bridge — {label}"
+            if color != status["color"]:
+                status["color"] = color
+                try:
+                    icon.icon = _icon_image(color)
+                except Exception:
+                    pass
             try:
-                icon.icon = _icon_image(color)
                 icon.update_menu()
             except Exception:
                 pass
             time.sleep(POLL_SECONDS)
 
-    def status_text(_):
-        st, reachable = fetch_state(resolve_hub(), resolve_token())
-        return summarize_state(st, reachable)[0]
-
-    def hooks_text(_):
-        return "Hooks: installed ✓" if hooks_installed() else "Hooks: not installed"
-
-    def menu():
-        return pystray.Menu(
-            pystray.MenuItem(status_text, None, enabled=False),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Open dashboard…", lambda: open_dashboard()),
-            pystray.MenuItem("Settings…", lambda: open_settings(first_run=False)),
-            pystray.MenuItem(hooks_text, None, enabled=False),
-            pystray.MenuItem("Reinstall hooks", lambda: install_hooks()),
-            pystray.MenuItem("Remove (uninstall)", lambda: uninstall()),
-            pystray.MenuItem("Pause reporting",
-                             lambda i, item: set_paused(not is_paused()),
-                             checked=lambda item: is_paused()),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Quit", lambda icon: icon.stop()),
-        )
-
-    icon = pystray.Icon("buddy-bridge", _icon_image("grey"),
-                        "buddy-bridge", menu=menu())
-    state["icon"] = icon
-
+    threading.Thread(target=poll, daemon=True).start()
+    threading.Thread(target=icon.run, daemon=True).start()
+    root.after(100, pump)
     if not _config.load_config():
-        # first run: collect hub/token/name and wire everything up
-        open_settings(first_run=True)
+        on_main(show_settings, True)                 # first run: open setup
 
-    threading.Thread(target=poll, args=(icon,), daemon=True).start()
-    icon.run()
+    try:
+        root.mainloop()
+    finally:
+        try:
+            icon.stop()
+        except Exception:
+            pass
+        lock.close()
 
 
 if __name__ == "__main__":
