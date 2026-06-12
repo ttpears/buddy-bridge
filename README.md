@@ -79,7 +79,7 @@ nothing but the hub needs to be reachable from the internet.
 > (closing the window isn't enough — its bridge auto-reconnects in the background).
 > Without the app running this never comes up.
 
-## 🗂️ Repositories & releases
+## 📚 Repositories & releases
 
 Two repos make up the project, plus the upstream they descend from:
 
@@ -190,7 +190,7 @@ clients at the bare hub:
 buddyctl client install --hub http://HUBHOST:8787 --token YOUR_TOKEN
 ```
 
-## ⚙️ `buddyctl` reference
+## 📖 `buddyctl` reference
 
 ```
 buddyctl hub     install [--port --transport --owner] | uninstall
