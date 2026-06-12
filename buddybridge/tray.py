@@ -143,11 +143,18 @@ def connect(hub, token, machine):
 
 
 def uninstall():
-    """'Remove': strip hooks + autostart, drop the relocated bundle."""
+    """Full teardown: stop the relay, strip the hooks + login autostart, drop the
+    relocated bundle and the saved config. The running exe / download folder is
+    left for you to delete — it can't remove itself while running."""
     from buddybridge import winapp
+    stop_relay()
     remove_hooks()
     unregister_autostart()
     winapp.remove_bundle()
+    try:
+        _config.config_path().unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def open_dashboard():
@@ -338,6 +345,20 @@ def main():
         if on:
             on_main(show_drive_help)
 
+    def confirm_uninstall():
+        from tkinter import messagebox
+        if not messagebox.askyesno(
+                "buddy-bridge — remove",
+                "Remove buddy-bridge?\n\n"
+                "Stops the relay, removes the Claude hooks, login autostart, and "
+                "settings, then quits.\n\n"
+                "Delete the unzipped folder yourself afterward.",
+                parent=root):
+            return
+        uninstall()
+        icon.stop()
+        root.destroy()
+
     menu = pystray.Menu(
         pystray.MenuItem(lambda *a: status["label"], None, enabled=False),
         pystray.Menu.SEPARATOR,
@@ -346,7 +367,7 @@ def main():
         pystray.MenuItem(lambda *a: "Hooks: installed ✓" if status["hooks"] else "Hooks: not installed",
                          None, enabled=False),
         pystray.MenuItem("Reinstall hooks", lambda *a: _act(install_hooks)),
-        pystray.MenuItem("Remove (uninstall)", lambda *a: _act(uninstall)),
+        pystray.MenuItem("Remove (uninstall)", lambda *a: on_main(confirm_uninstall)),
         pystray.MenuItem("Pause reporting",
                          lambda *a: _act(lambda: set_paused(not is_paused())),
                          checked=lambda *a: is_paused()),
