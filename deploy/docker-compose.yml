@@ -1,0 +1,68 @@
+# Public buddy-bridge hub behind Traefik, with automatic Let's Encrypt TLS.
+#
+# Traefik terminates HTTPS on :443 (redirecting :80) and is the ONLY thing
+# exposed to the internet. The hub is not published to the host — Traefik
+# reaches it over the internal `web` network — and it refuses to start without
+# a BUDDY_TOKEN, so a public hub is always token-gated on every route.
+#
+# Quick start:
+#   cp .env.example .env      # then set HUB_DOMAIN, ACME_EMAIL, BUDDY_TOKEN
+#   docker compose up -d
+#
+# Already running Traefik? Delete the `traefik` service below and keep
+# `buddyhub`; its labels attach to your existing Traefik as long as they share
+# a network. Adjust the certresolver name to yours.
+
+services:
+  traefik:
+    image: traefik:v3.1
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.le.acme.email=${ACME_EMAIL:?set ACME_EMAIL in .env}
+      - --certificatesresolvers.le.acme.storage=/acme/acme.json
+      - --certificatesresolvers.le.acme.tlschallenge=true
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - acme:/acme
+    networks:
+      - web
+
+  buddyhub:
+    image: python:3.12-slim
+    restart: unless-stopped
+    # Pin BUDDY_REF to a release tag (e.g. v0.1.0) for a reproducible deploy.
+    command:
+      - sh
+      - -c
+      - >-
+        pip install --no-cache-dir
+        "buddy-bridge @ git+https://github.com/ttpears/buddy-bridge@${BUDDY_REF:-main}"
+        && exec buddyhub --bind 0.0.0.0 --port 8787 --transport relay --owner "${HUB_OWNER:-there}"
+    environment:
+      # Empty/unset would disable auth — fail closed instead of exposing an open hub.
+      BUDDY_TOKEN: ${BUDDY_TOKEN:?set a strong BUDDY_TOKEN in .env (openssl rand -hex 32)}
+    expose:
+      - "8787"
+    networks:
+      - web
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.buddyhub.rule=Host(`${HUB_DOMAIN:?set HUB_DOMAIN in .env}`)
+      - traefik.http.routers.buddyhub.entrypoints=websecure
+      - traefik.http.routers.buddyhub.tls.certresolver=le
+      - traefik.http.services.buddyhub.loadbalancer.server.port=8787
+
+networks:
+  web:
+
+volumes:
+  acme:

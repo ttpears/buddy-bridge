@@ -161,29 +161,42 @@ hostname. Restart any running `claude` session to load the hooks.
 
 ---
 
-### Deploying the hub behind Traefik
+### Public hub (Docker + Traefik)
 
-For a public (or corporate) hub, front the container with Traefik and a cert
-resolver for automatic TLS. The sketch below is a starting point — adjust the
-domain and `certresolver` name for your setup:
+To run the hub on a public server, use the committed compose file
+[`deploy/docker-compose.yml`](deploy/docker-compose.yml). It brings up Traefik
+with automatic Let's Encrypt TLS in front of the hub, and the hub is **never
+published to the host** — only Traefik reaches it, over the internal network.
 
-```yaml
-# docker-compose.yml (sketch)
-services:
-  buddyhub:
-    image: python:3.12-slim
-    command: sh -c "pip install 'buddy-bridge' && buddyhub --port 8787 --transport relay --owner you"
-    environment: [ "BUDDY_TOKEN=change-me" ]
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.buddy.rule=Host(`buddy.you.example.com`)
-      - traefik.http.routers.buddy.entrypoints=websecure
-      - traefik.http.routers.buddy.tls.certresolver=le
-      - traefik.http.services.buddy.loadbalancer.server.port=8787
-```
+> **A public hub must be secured.** The compose **refuses to start without a
+> `BUDDY_TOKEN`**, and with a token set the hub gates *every* route — events, the
+> relay stream, and the dashboard. Traefik forces HTTPS. Use a long random token
+> (`openssl rand -hex 32`), not a guessable one.
 
-The relay stream rides plain HTTP/chunked, which Traefik proxies natively — no
-special config needed. For LAN or Tailscale use the bare form instead:
+1. Point a DNS `A` record at the host and open ports **80** and **443**.
+2. Fill in the environment:
+   ```bash
+   cd deploy
+   cp .env.example .env       # set HUB_DOMAIN, ACME_EMAIL, and a strong BUDDY_TOKEN
+   ```
+3. Bring it up:
+   ```bash
+   docker compose up -d
+   ```
+4. Point each machine at it (token required):
+   ```bash
+   buddyctl client install --hub https://buddy.<you>.<co>.<tld> --token "$BUDDY_TOKEN" --name workstation
+   ```
+   A desktop relay or the phone connects the same way (it dials the hub's
+   `/relay/stream`). Open the dashboard at
+   `https://buddy.<you>.<co>.<tld>/?token=YOUR_TOKEN`.
+
+**Already running Traefik?** Delete the `traefik` service from the compose and
+keep `buddyhub` — its labels attach to your existing Traefik as long as they
+share a network; adjust the `certresolver` name to yours.
+
+For LAN or Tailscale (no public exposure) you don't need any of this — just point
+clients at the bare hub:
 
 ```bash
 buddyctl client install --hub http://HUBHOST:8787 --token YOUR_TOKEN
