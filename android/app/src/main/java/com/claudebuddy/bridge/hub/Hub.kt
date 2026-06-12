@@ -1,5 +1,6 @@
 package com.claudebuddy.bridge.hub
 
+import android.util.Log
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.sync.Mutex
@@ -238,19 +239,25 @@ class Hub(private val onHeartbeat: (JSONObject) -> Unit) {
     fun startHeartbeatLoop(scope: CoroutineScope): Job = scope.launch {
         var lastSendMs = 0L
         while (isActive) {
-            // Wait for dirty signal or 1s timeout (mirrors Python's _dirty.wait(timeout=1.0))
-            val fired = withTimeoutOrNull(1000) {
-                dirty.receive()
-                true
-            } ?: false
+            try {
+                // Wait for dirty signal or 1s timeout (mirrors Python's _dirty.wait(timeout=1.0))
+                val fired = withTimeoutOrNull(1000) {
+                    dirty.receive()
+                    true
+                } ?: false
 
-            val now = nowMs()
-            val active = lock.withLock { sessions.isNotEmpty() }
-            val intervalMs = (if (active) KEEPALIVE_ACTIVE_SEC else KEEPALIVE_IDLE_SEC) * 1000
-            if (fired || (now - lastSendMs) >= intervalMs) {
-                val hb = buildHeartbeat()
-                onHeartbeat(hb)
-                lastSendMs = now
+                val now = nowMs()
+                val active = lock.withLock { sessions.isNotEmpty() }
+                val intervalMs = (if (active) KEEPALIVE_ACTIVE_SEC else KEEPALIVE_IDLE_SEC) * 1000
+                if (fired || (now - lastSendMs) >= intervalMs) {
+                    val hb = buildHeartbeat()
+                    onHeartbeat(hb)
+                    lastSendMs = now
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("Hub", "heartbeat loop error (continuing): ${e.message}")
             }
         }
     }
