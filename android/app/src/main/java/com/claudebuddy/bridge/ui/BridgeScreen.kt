@@ -27,6 +27,10 @@ fun BridgeScreen(
     onOwnerNameChange: (String) -> Unit,
     buddyToken: String = "",
     onBuddyTokenChange: (String) -> Unit = {},
+    mode: String = "serve_hub",
+    onModeChange: (String) -> Unit = {},
+    remoteHubUrl: String = "",
+    onRemoteHubUrlChange: (String) -> Unit = {},
     onToggle: () -> Unit
 ) {
     val focusManager = LocalFocusManager.current
@@ -128,6 +132,28 @@ fun BridgeScreen(
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Relay to remote hub", color = MaterialTheme.colorScheme.onBackground)
+            Spacer(modifier = Modifier.width(12.dp))
+            Switch(
+                checked = mode == "relay",
+                enabled = !isRunning,
+                onCheckedChange = { onModeChange(if (it) "relay" else "serve_hub") }
+            )
+        }
+        if (mode == "relay") {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = remoteHubUrl,
+                onValueChange = onRemoteHubUrlChange,
+                enabled = !isRunning,
+                singleLine = true,
+                label = { Text("Hub URL (https://buddy.example.com)") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
     }
 }
 

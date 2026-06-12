@@ -45,3 +45,13 @@ def test_ctl_runnable_as_module():
     out = subprocess.run([sys.executable, "-m", "buddybridge.ctl", "--help"],
                          capture_output=True, text=True, timeout=30)
     assert out.returncode == 0 and "client" in out.stdout
+
+
+def test_relay_install_uses_hub_url(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "config_path", lambda: tmp_path / "config.json")
+    reg = []
+    monkeypatch.setattr("buddybridge.ctl.services.register",
+                        lambda name, cmd, desc: reg.append((name, cmd)))
+    ctl.main(["relay", "install", "--hub", "https://buddy.x.com"])
+    assert any(name == "buddy-relay" and "--hub https://buddy.x.com" in cmd
+               for name, cmd in reg)

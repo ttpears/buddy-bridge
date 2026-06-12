@@ -46,6 +46,8 @@ class MainActivity : ComponentActivity() {
             CoroutineScope(Dispatchers.Main).launch {
                 svc.ownerName = settings.ownerName.first()
                 svc.buddyToken = settings.buddyToken.first()
+                svc.mode = settings.mode.first()
+                svc.remoteHubUrl = settings.remoteHubUrl.first()
             }
             Log.i("MainActivity", "service bound")
         }
@@ -97,8 +99,12 @@ class MainActivity : ComponentActivity() {
                 // provides the initial value and persists in the background.
                 val savedOwner by settings.ownerName.collectAsState(initial = "")
                 val savedToken by settings.buddyToken.collectAsState(initial = "")
+                val savedMode by settings.mode.collectAsState(initial = "serve_hub")
+                val savedRemoteHubUrl by settings.remoteHubUrl.collectAsState(initial = "")
                 var ownerName by remember { mutableStateOf("") }
                 var buddyToken by remember { mutableStateOf("") }
+                var mode by remember { mutableStateOf("serve_hub") }
+                var remoteHubUrl by remember { mutableStateOf("") }
                 val scope = rememberCoroutineScope()
 
                 // Seed local state from DataStore once loaded
@@ -107,6 +113,12 @@ class MainActivity : ComponentActivity() {
                 }
                 LaunchedEffect(savedToken) {
                     if (buddyToken.isEmpty() && savedToken.isNotEmpty()) buddyToken = savedToken
+                }
+                LaunchedEffect(savedMode) {
+                    mode = savedMode
+                }
+                LaunchedEffect(savedRemoteHubUrl) {
+                    if (remoteHubUrl.isEmpty() && savedRemoteHubUrl.isNotEmpty()) remoteHubUrl = savedRemoteHubUrl
                 }
 
                 BridgeScreen(
@@ -125,6 +137,18 @@ class MainActivity : ComponentActivity() {
                         buddyToken = token
                         svc?.buddyToken = token
                         scope.launch { settings.setBuddyToken(token) }
+                    },
+                    mode = mode,
+                    onModeChange = { m ->
+                        mode = m
+                        svc?.mode = m
+                        scope.launch { settings.setMode(m) }
+                    },
+                    remoteHubUrl = remoteHubUrl,
+                    onRemoteHubUrlChange = { url ->
+                        remoteHubUrl = url
+                        svc?.remoteHubUrl = url
+                        scope.launch { settings.setRemoteHubUrl(url) }
                     },
                     onToggle = {
                         if (running) {

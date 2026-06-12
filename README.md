@@ -32,10 +32,15 @@ One box can be all three. Extra machines are just **clients** pointed at the hub
 that's the whole multi-machine story.
 
 ```
-  server A ─┐
-  server B ─┼──HTTP :8787──►  hub  ──BLE──►  🟧 stick
-  server C ─┘                 └─ dashboard :8787 (approve/deny in a browser)
+  WSL box  ─┐
+  Windows  ─┤
+  Linux    ─┼──HTTPS one URL──►  🏢 hub  ◄──dials out── 📱 phone (relay+BLE) ──► 🟧 stick
+  macOS    ─┘   buddy.<you>.<co>.<tld>   (or a desktop relay — interchangeable)
+                └ dashboard, same URL
 ```
+
+The relay — whether a desktop machine or the phone — dials **out** to the hub, so
+nothing but the hub needs to be reachable from the internet.
 
 > **Using the Claude desktop app?** Its built-in Hardware Buddy and the bridge's
 > relay both want the stick, and BLE allows only **one** owner — they'll fight over
@@ -64,6 +69,24 @@ Android app) from here, and the two halves meet over Bluetooth.
 
 > **Unofficial & independent** — not affiliated with, endorsed by, or supported
 > by Anthropic. The firmware fork tracks `anthropics/claude-desktop-buddy`.
+
+---
+
+## Which setup is mine?
+
+Pick the row that matches you, then jump to the matching section below.
+
+| Your situation | What to set up |
+| -------------- | -------------- |
+| One machine that has the Bluetooth radio **and** the stick | **Recipe 1** — `hub` + `relay` + `client` on that one box |
+| Several machines feeding one stick | **Recipe 2** — stand up a `hub` once, then `client install` on each machine |
+| The stick rides on your **phone** (no desktop Bluetooth, or you're mobile) | **[Android app](#android-bridge-app-alternative-to-the-relay-machine)**, *Relay to remote hub* mode — phone drives BLE and dials out to your hub |
+| Your **phone is the whole rig** (hub + stick in one) | **[Android app](#android-bridge-app-alternative-to-the-relay-machine)**, *Serve hub here* mode — point machines at `http://<phone-ip>:8787` |
+| The hub must be reachable **over the internet** | Front the hub with **[Traefik](#deploying-the-hub-behind-traefik)** (automatic TLS) |
+| **No stick at all** | Any hub — drive it from the web **dashboard's** Approve/Deny buttons |
+
+Most people are one of the first two rows. Everything else just changes *where the
+relay lives* (a desktop box, or the phone) and *how machines reach the hub*.
 
 ---
 
@@ -96,25 +119,41 @@ with `buddy`; plain `claude` stays ambient-only.
 On each additional machine:
 
 ```bash
-buddyctl client install --hub http://HUBHOST:8787 --name workstation
+buddyctl client install --hub https://buddy.<you>.<company>.<tld> --token YOUR_TOKEN --name workstation
 ```
 
 It appears on the dashboard and stick immediately. `--name` defaults to the
 hostname. Restart any running `claude` session to load the hooks.
 
-### Recipe 3 — tunnels (only if the hub isn't directly reachable)
+---
 
-A tunnel just makes a remote hub look **local** to the client.
+### Deploying the hub behind Traefik
 
-- **Forward** (client dials the hub — the usual case):
-  ```bash
-  buddyctl client install --tunnel HUB_SSH_HOST --name workstation
-  ```
-- **Reverse** (the hub is in **WSL** / behind NAT, so it dials out). Run on the hub:
-  ```bash
-  buddyctl tunnel install --to CLIENT_SSH_HOST
-  ```
-  then on the client use `--hub http://127.0.0.1:8787` with no tunnel of its own.
+For a public (or corporate) hub, front the container with Traefik and a cert
+resolver for automatic TLS. The sketch below is a starting point — adjust the
+domain and `certresolver` name for your setup:
+
+```yaml
+# docker-compose.yml (sketch)
+services:
+  buddyhub:
+    image: python:3.12-slim
+    command: sh -c "pip install 'buddy-bridge' && buddyhub --port 8787 --transport relay --owner you"
+    environment: [ "BUDDY_TOKEN=change-me" ]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.buddy.rule=Host(`buddy.you.example.com`)
+      - traefik.http.routers.buddy.entrypoints=websecure
+      - traefik.http.routers.buddy.tls.certresolver=le
+      - traefik.http.services.buddy.loadbalancer.server.port=8787
+```
+
+The relay stream rides plain HTTP/chunked, which Traefik proxies natively — no
+special config needed. For LAN or Tailscale use the bare form instead:
+
+```bash
+buddyctl client install --hub http://HUBHOST:8787 --token YOUR_TOKEN
+```
 
 ---
 
@@ -122,20 +161,23 @@ A tunnel just makes a remote hub look **local** to the client.
 
 ```
 buddyctl hub     install [--port --transport --owner] | uninstall
-buddyctl relay   install [--hub] | uninstall | pair
-buddyctl client  install [--hub URL] [--name NAME] [--tunnel SSH_HOST] | uninstall | status
-buddyctl tunnel  install --to SSH_HOST | uninstall
+buddyctl relay   install [--hub URL] | uninstall | pair
+buddyctl client  install [--hub URL] [--name NAME] | uninstall | status
 buddyctl status
 ```
 
-- `--hub` defaults to `http://127.0.0.1:8787`; `--name` to the hostname. These are
-  saved to a per-machine config (`~/.config/buddybridge/config.json`, or `%APPDATA%`
-  on Windows) that the hook reads — so the same install works on every OS.
+- `--hub` takes a full URL (e.g. `https://buddy.<you>.<co>.<tld>` or
+  `http://127.0.0.1:8787` for localhost). Defaults to `http://127.0.0.1:8787`.
+  `--name` defaults to the hostname. Both are saved to a per-machine config
+  (`~/.config/buddybridge/config.json`, or `%APPDATA%` on Windows) that the hook
+  reads — so the same install works on every OS.
 - `install` is idempotent; `uninstall` removes only what buddyctl added.
-- **Optional auth:** set `BUDDY_TOKEN` (env, or `"token"` in the config file) and the
-  hook sends it as an `X-Buddy-Token` header. Useful when the hub is reachable over a
-  network (e.g. the Android app below) rather than just localhost. It must match the
-  token configured on whatever is serving the hub.
+- **Auth:** set `BUDDY_TOKEN` (env, or `"token"` in the config file) and the hook
+  sends it as an `X-Buddy-Token` header. Required when the hub is exposed over a
+  network. It must match the token configured on the hub. With a token set every
+  route is gated — including the dashboard, so open it as
+  `http://HUBHOST:8787/?token=YOUR_TOKEN` (the hub also accepts the token on the
+  `?token=` query for browsers and the BLE relay stream).
 
 ---
 
@@ -163,10 +205,14 @@ and Approve/Deny buttons — the bridge is fully usable with no stick at all.
 
 ## Android bridge app (alternative to the relay machine)
 
-Instead of running `buddyhub` + `buddy-relay` on a desk machine, the `android/`
-app folds both into a single phone app: it talks BLE to the stick and serves the
-same hub HTTP API on port `8787`. This replaces the WSL-hub-plus-Windows-relay
-topology when you'd rather the bridge live on a phone that's always with you.
+The `android/` app has two modes, selectable from a toggle in the UI:
+
+- **Serve hub here** — the phone runs the full hub + BLE relay, exactly as before.
+  All-in-one: point your dev machines at `http://<phone-ip>:8787` (works over
+  Tailscale/LAN when the phone is reachable).
+- **Relay to remote hub** — enter a hub URL and token; the phone drives BLE and
+  dials **out** to your hub. Works on cellular or NAT — nothing connects *to* the
+  phone. This is the recommended mode when you have a server-side hub.
 
 **Install (easiest — prebuilt APK):**
 
@@ -178,16 +224,22 @@ topology when you'd rather the bridge live on a phone that's always with you.
    later versions install over the top without uninstalling first.
 3. First launch: grant **Bluetooth** (and, on Android ≤ 11, **Location**) plus
    **Notifications**, and set the app **Unrestricted** under Battery so its
-   foreground service survives. Set an **Owner** name and (optionally) a
-   **Buddy Token**, then tap **Start**.
-4. Point your machines at the phone: `BUDDY_HUB=http://<phone-ip>:8787` and a
-   matching `BUDDY_TOKEN` — typically over **Tailscale/VPN** so the phone is
-   reachable from your dev boxes.
+   foreground service survives. Set an **Owner** name and a **Buddy Token**, then
+   select your mode and tap **Start**.
+4. **Relay mode:** enter the hub URL (e.g. `https://buddy.<you>.<co>.<tld>`) and
+   token — the phone dials out, no inbound access needed.
+   **Hub mode:** point your dev machines at `http://<phone-ip>:8787` with a
+   matching token, typically over Tailscale/LAN.
 
 > Prefer to build it yourself? `cd android && ./gradlew assembleDebug` (JDK 17 +
 > Android SDK) → `android/app/build/outputs/apk/debug/app-debug.apk`. Every push
 > to `main` also builds the APK as a CI artifact, and tagging `vX.Y.Z` cuts a
 > Release with the APK attached automatically.
+
+## macOS clients
+
+`buddyctl client install --hub <URL> --token …` registers a **launchd LaunchAgent**
+on macOS — the same single command as Linux, WSL, and Windows. No extra steps.
 
 ## Windows clients
 
@@ -199,8 +251,10 @@ env vars each time:
   the `buddy` launcher).
 
 If the package is installed via pip/pipx, `buddyctl client install` already wires
-hooks and registers a Startup launcher — use the `.cmd` files for the
-quick/manual case (e.g. pointing a laptop at the Android hub).
+hooks and registers a Startup launcher — use the `.cmd` files for the quick/manual
+case. The hook reads hub URL and token from `%APPDATA%\buddybridge\config.json`
+(same config written by `buddyctl client install`), so the `.cmd` fallback and the
+managed service share settings.
 
 ---
 
@@ -211,7 +265,7 @@ quick/manual case (e.g. pointing a laptop at the Android hub).
 | Stick flaps between states / relay connect-disconnect loop | The desktop app is fighting the relay for the stick. **Forget** Hardware Buddy in the app (and leave it forgotten), then `buddyctl relay uninstall && buddyctl relay install`. |
 | A machine's activity never shows | Its `claude` session started **before** hooks were installed — restart it. Or check `buddyctl status`. |
 | Activity shows but A/B does nothing | Session wasn't launched via `buddy` (no `BUDDY_CONTROL=1`) — ambient works, control doesn't. |
-| Remote machine silent | Hub reachable from it? `curl -m5 http://HUBHOST:8787/state`. Tunnel up? `buddyctl status`. |
+| Remote machine silent | Hub reachable from it? `curl -m5 https://HUBHOST/state`. Check `buddyctl status` and verify `--hub` URL and token are set. |
 | Relay never finds the stick | Desktop app still holds it (Forget it), or it isn't paired: `buddyctl relay pair`. |
 | `buddy-relay` says it needs Bluetooth | Install the extra: `pipx install "buddy-bridge[relay] @ git+…"`. |
 

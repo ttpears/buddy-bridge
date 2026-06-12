@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from buddybridge import config
-from buddybridge.ctl import hooks, services, tunnel
+from buddybridge.ctl import hooks, services
 
 
 def _claude_settings_path():
@@ -23,23 +23,15 @@ def _python_for_service():
 # ---- client ------------------------------------------------------------- #
 def _client_install(args):
     cfg = config.load_config()
-    if args.tunnel:
-        # A forward tunnel makes the hub local; point the hub at 127.0.0.1 and
-        # register the ssh service that keeps it up.
-        services.register("buddy-tunnel", tunnel.forward_tunnel_cmd(args.tunnel),
-                          f"Claude Buddy forward tunnel to {args.tunnel}")
-        cfg["hub"] = "http://127.0.0.1:8787"
-    elif args.hub:
+    if args.hub:
         cfg["hub"] = args.hub.rstrip("/")
     cfg.setdefault("hub", "http://127.0.0.1:8787")
     cfg["machine"] = args.name or cfg.get("machine") or socket.gethostname().split(".")[0]
     if args.token is not None:
-        cfg["token"] = args.token        # shared secret, sent as X-Buddy-Token
+        cfg["token"] = args.token
     config.save_config(cfg)
     cmd = hooks.install(str(_claude_settings_path()))
     print(f"client installed: machine={cfg['machine']}  hub={cfg['hub']}")
-    if args.tunnel:
-        print(f"  forward tunnel -> {args.tunnel} (hub reachable at 127.0.0.1:8787)")
     print(f"  hook command: {cmd}")
     print("  restart any running `claude` session to load the hooks.")
 
@@ -71,9 +63,10 @@ def _hub_uninstall(args):
 
 # ---- relay -------------------------------------------------------------- #
 def _relay_install(args):
-    exec_cmd = f'"{_python_for_service()}" -m buddybridge.relay --hub {args.hub}'
+    hub = args.hub or config.load_config().get("hub") or "http://127.0.0.1:8787"
+    exec_cmd = f'"{_python_for_service()}" -m buddybridge.relay --hub {hub}'
     services.register("buddy-relay", exec_cmd, "Claude Buddy BLE relay")
-    print("relay installed.")
+    print(f"relay installed (hub {hub}).")
 
 
 def _relay_uninstall(args):
@@ -84,19 +77,7 @@ def _relay_uninstall(args):
 def _relay_pair(args):
     """Run the relay in the foreground so you can enter the BLE passkey."""
     from buddybridge import relay
-    relay.main(["--console", "--hub", args.hub])
-
-
-# ---- tunnel (reverse, hub side) ----------------------------------------- #
-def _tunnel_install(args):
-    services.register("buddy-tunnel", tunnel.reverse_tunnel_cmd(args.to),
-                      f"Claude Buddy reverse tunnel to {args.to}")
-    print(f"reverse tunnel installed -> {args.to} (exposes this hub on its localhost:8787).")
-
-
-def _tunnel_uninstall(args):
-    services.unregister("buddy-tunnel")
-    print("tunnel removed.")
+    relay.main(["--console"] + (["--hub", args.hub] if args.hub else []))
 
 
 # ---- status ------------------------------------------------------------- #
@@ -123,7 +104,6 @@ def main(argv=None):
     pci = pcs.add_parser("install")
     pci.add_argument("--hub", help="hub URL (default http://127.0.0.1:8787)")
     pci.add_argument("--name", help="display name (default: hostname)")
-    pci.add_argument("--tunnel", help="SSH host to forward-tunnel the hub through (Task 6)")
     pci.add_argument("--token", help="shared secret sent as X-Buddy-Token (must match the hub)")
     pci.set_defaults(func=_client_install)
     pcs.add_parser("uninstall").set_defaults(func=_client_uninstall)
@@ -142,19 +122,12 @@ def main(argv=None):
     pr = sub.add_parser("relay", help="drive the stick over Bluetooth")
     prs = pr.add_subparsers(dest="action", required=True)
     pri = prs.add_parser("install")
-    pri.add_argument("--hub", default="127.0.0.1:8790")
+    pri.add_argument("--hub", default=None)
     pri.set_defaults(func=_relay_install)
     prs.add_parser("uninstall").set_defaults(func=_relay_uninstall)
     prp = prs.add_parser("pair")
-    prp.add_argument("--hub", default="127.0.0.1:8790")
+    prp.add_argument("--hub", default=None)
     prp.set_defaults(func=_relay_pair)
-
-    pt = sub.add_parser("tunnel", help="reverse SSH tunnel (hub side, e.g. a WSL hub)")
-    pts = pt.add_subparsers(dest="action", required=True)
-    pti = pts.add_parser("install")
-    pti.add_argument("--to", required=True, help="SSH host to expose this hub on")
-    pti.set_defaults(func=_tunnel_install)
-    pts.add_parser("uninstall").set_defaults(func=_tunnel_uninstall)
 
     sub.add_parser("status", help="show what this machine runs").set_defaults(func=_status)
 

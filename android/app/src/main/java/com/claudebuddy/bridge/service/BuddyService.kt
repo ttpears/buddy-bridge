@@ -53,6 +53,11 @@ class BuddyService : Service() {
             httpServer?.token = value
         }
 
+    // "serve_hub" (embedded hub + BLE) or "relay" (BLE + outbound RelayClient)
+    var mode: String = "serve_hub"
+    var remoteHubUrl: String = ""
+    private var relayClient: com.claudebuddy.bridge.relay.RelayClient? = null
+
     private val _httpRunning = MutableStateFlow(false)
     val httpRunning: StateFlow<Boolean> = _httpRunning
 
@@ -107,11 +112,7 @@ class BuddyService : Service() {
     }
 
     private fun startBridge() {
-        if (hub != null) return  // already running
-
-        // Create Hub — heartbeats go to BLE
-        val h = Hub { hb -> sendHeartbeat(hb) }
-        hub = h
+        if (bleManager != null) return  // already running
 
         // Create BLE manager — incoming lines resolve prompts
         val ble = BleManager(
@@ -121,6 +122,21 @@ class BuddyService : Service() {
         )
         ble.onConnected = { onBleConnected() }
         bleManager = ble
+
+        if (mode == "relay") {
+            val rc = com.claudebuddy.bridge.relay.RelayClient(
+                hubUrl = remoteHubUrl, token = buddyToken,
+                onLine = { line -> bleManager?.sendJson(line) })
+            relayClient = rc
+            ble.start(scope)
+            rc.start(scope)
+            Log.i(TAG, "bridge started (relay -> $remoteHubUrl)")
+            return
+        }
+
+        // Create Hub — heartbeats go to BLE
+        val h = Hub { hb -> sendHeartbeat(hb) }
+        hub = h
 
         // Create HTTP server
         val http = BuddyHttpServer(h, 8787)
@@ -139,7 +155,7 @@ class BuddyService : Service() {
         ble.start(scope)
         h.startHeartbeatLoop(scope)
 
-        Log.i(TAG, "bridge started")
+        Log.i(TAG, "bridge started (serve_hub)")
     }
 
     private fun sendHeartbeat(hb: JSONObject) {
@@ -182,9 +198,14 @@ class BuddyService : Service() {
             if (json.optString("cmd") == "permission") {
                 val pid = json.optString("id", "")
                 val decision = json.optString("decision", "deny")
-                scope.launch {
-                    val ok = hub?.resolve(pid, decision) ?: false
-                    Log.i(TAG, "device decision $decision for $pid -> ${if (ok) "ok" else "stale"}")
+                val rc = relayClient
+                if (rc != null) {
+                    scope.launch(Dispatchers.IO) { rc.postButton(pid, decision) }
+                } else {
+                    scope.launch {
+                        val ok = hub?.resolve(pid, decision) ?: false
+                        Log.i(TAG, "device decision $decision for $pid -> ${if (ok) "ok" else "stale"}")
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -193,6 +214,7 @@ class BuddyService : Service() {
     }
 
     override fun onDestroy() {
+        relayClient?.stop(); relayClient = null
         bleManager?.stop()
         httpServer?.stop()
         _httpRunning.value = false

@@ -1,38 +1,37 @@
 #!/usr/bin/env python3
 """
 relay.py — M5Stick BLE relay (runs on the machine with the Bluetooth radio).
-Bridges buddyhub's TCP relay socket <-> the stick's BLE Nordic UART.
+Bridges a buddyhub's HTTP relay stream <-> the stick's BLE Nordic UART.
 
-Self-contained: a supervising loop (restarts its own connections), a
-single-instance guard (a loopback-port lock — a second copy exits immediately,
-so it can't pile up), and a size-capped rotating log. Installed and run as a
-background service by `buddyctl relay install`.
+Outbound only: opens GET {hub}/relay/stream (chunked newline-JSON heartbeats),
+writes each line to the stick verbatim, and POSTs the stick's button presses to
+{hub}/button. No inbound port — so it works behind NAT, on a laptop, anywhere.
 
   buddy-relay                   # background run (logs to relay.log)
   buddy-relay --console         # foreground + console logging (debugging)
+  buddy-relay --hub https://buddy.example.com   # remote hub over TLS
 """
 import argparse
 import asyncio
+import json
 import logging
 import logging.handlers
 import socket
 import sys
+import urllib.request
 from pathlib import Path
 
-# bleak is the optional [relay] extra — imported lazily so `buddy-relay --help`
-# and importing this module work without it; main() checks for it up front.
+from buddybridge import config as _config
 
-NUS_SVC = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
 NUS_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"   # write   host -> device
 NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"   # notify  device -> host
 
-LOCK_PORT = 8791                                   # loopback single-instance lock
+LOCK_PORT = 8791
 LOGFILE = Path(__file__).resolve().parent / "relay.log"
-_lock = None                                        # keep the lock socket alive
+_lock = None
 
 
 def single_instance():
-    """Bind a loopback port as a lock. False if another relay already holds it."""
     global _lock
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
@@ -53,80 +52,125 @@ def setup_logging(console):
                         datefmt="%Y-%m-%d %H:%M:%S", handlers=handlers)
 
 
-async def _drain(writer):
+def resolve_hub(arg):
+    return (arg or _config.load_config().get("hub") or "http://127.0.0.1:8787").rstrip("/")
+
+
+def resolve_token():
+    import os
+    return os.environ.get("BUDDY_TOKEN") or _config.load_config().get("token") or ""
+
+
+def post_button(hub, token, payload):
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-Buddy-Token"] = token
+    req = urllib.request.Request(hub + "/button", data=json.dumps(payload).encode(),
+                                 headers=headers, method="POST")
     try:
-        await writer.drain()
-    except Exception:
-        pass
+        urllib.request.urlopen(req, timeout=5).read()
+    except Exception as e:
+        logging.info("button POST failed: %s", e)
 
 
-async def relay_once(host, port, name_prefix, scan_timeout, do_pair, pair_timeout):
+def open_stream(hub, token):
+    url = hub + "/relay/stream"
+    headers = {}
+    if token:
+        headers["X-Buddy-Token"] = token
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    return urllib.request.urlopen(req, timeout=None)
+
+
+async def relay_once(hub, token, name_prefix, scan_timeout, do_pair, pair_timeout):
     from bleak import BleakScanner, BleakClient
-    logging.info("connecting to hub %s:%d", host, port)
-    reader, writer = await asyncio.open_connection(host, port)
-    logging.info("hub connected; scanning for the stick")
-    try:
-        dev = await BleakScanner.find_device_by_filter(
-            lambda d, ad: (d.name or "").startswith(name_prefix), timeout=scan_timeout)
-        if not dev:
-            logging.info("no BLE device advertising '%s*' found", name_prefix)
-            return
-        logging.info("found %s [%s]; connecting BLE", dev.name, dev.address)
-        loop = asyncio.get_running_loop()
-        async with BleakClient(dev) as client:
-            if do_pair:
-                try:
-                    await client.pair()
-                except Exception as e:
-                    logging.info("pair() note: %s", e)
-            logging.info("BLE connected")
+    logging.info("scanning for the stick")
+    dev = await BleakScanner.find_device_by_filter(
+        lambda d, ad: (d.name or "").startswith(name_prefix), timeout=scan_timeout)
+    if not dev:
+        logging.info("no BLE device advertising '%s*' found", name_prefix)
+        return
+    logging.info("found %s [%s]; connecting BLE", dev.name, dev.address)
+    loop = asyncio.get_running_loop()
+    lines = asyncio.Queue()
 
-            def on_notify(_s, data: bytearray):
-                writer.write(bytes(data))
-                loop.create_task(_drain(writer))
+    def reader_thread(resp):
+        """Blocking HTTP stream reader -> asyncio queue (runs in a thread)."""
+        try:
+            for raw in resp:
+                line = raw.decode(errors="ignore").strip()
+                if line:
+                    loop.call_soon_threadsafe(lines.put_nowait, line)
+        except Exception as e:
+            logging.info("stream read ended: %s", e)
+        finally:
+            loop.call_soon_threadsafe(lines.put_nowait, None)   # EOF sentinel
 
-            # The NUS characteristics are encrypted-only: until bonding finishes
-            # (you type the stick's passkey on the desktop) start_notify fails.
-            # Retry on the SAME link so one passkey stays on screen for the whole
-            # window, instead of dropping the link and forcing a fresh code every
-            # reconnect. Succeeds on the first try once already bonded.
-            deadline = loop.time() + pair_timeout
-            while True:
+    async with BleakClient(dev) as client:
+        if do_pair:
+            try:
+                await client.pair()
+            except Exception as e:
+                logging.info("pair() note: %s", e)
+        logging.info("BLE connected")
+
+        def on_notify(_s, data: bytearray):
+            # Device -> host: button-press permission lines. Parse and POST.
+            for piece in bytes(data).decode(errors="ignore").splitlines():
+                piece = piece.strip()
+                if not piece:
+                    continue
                 try:
-                    await client.start_notify(NUS_TX, on_notify)
-                    break
-                except Exception as e:
-                    if loop.time() >= deadline:
-                        raise
-                    logging.info("waiting for pairing — enter the passkey on the desktop (%s)", e)
-                    await asyncio.sleep(2.0)
-            logging.info("subscribed; relaying")
-            mtu = (client.mtu_size - 3) if getattr(client, "mtu_size", 0) else 20
+                    msg = json.loads(piece)
+                except json.JSONDecodeError:
+                    continue
+                if msg.get("cmd") == "permission":
+                    payload = {"id": msg.get("id", ""),
+                               "decision": msg.get("decision", "deny")}
+                    loop.call_soon_threadsafe(
+                        loop.run_in_executor, None, post_button, hub, token, payload)
+
+        deadline = loop.time() + pair_timeout
+        while True:
+            try:
+                await client.start_notify(NUS_TX, on_notify)
+                break
+            except Exception as e:
+                if loop.time() >= deadline:
+                    raise
+                logging.info("waiting for pairing — enter the passkey on the desktop (%s)", e)
+                await asyncio.sleep(2.0)
+
+        logging.info("connecting hub stream %s", hub)
+        resp = await loop.run_in_executor(None, open_stream, hub, token)
+        loop.run_in_executor(None, reader_thread, resp)
+        logging.info("subscribed; relaying")
+        mtu = (client.mtu_size - 3) if getattr(client, "mtu_size", 0) else 20
+        try:
             while True:
-                line = await reader.readline()
-                if not line:
-                    logging.info("hub closed the connection")
+                line = await lines.get()
+                if line is None:
+                    logging.info("hub stream closed")
                     break
-                chunks = [line[i:i + mtu] for i in range(0, len(line), mtu)]
+                payload = (line + "\n").encode()
+                chunks = [payload[i:i + mtu] for i in range(0, len(payload), mtu)]
                 for idx, chunk in enumerate(chunks):
                     await client.write_gatt_char(NUS_RX, chunk, response=False)
-                    # Small pause between chunks lets the BLE radio flush each
-                    # packet instead of queuing a burst — reduces peak current
-                    # draw on the device and avoids dropped notifications.
                     if idx < len(chunks) - 1:
                         await asyncio.sleep(0.005)
-    finally:
-        writer.close()
-        try:
-            await writer.wait_closed()
-        except Exception:
-            pass
+        finally:
+            try:
+                resp.close()
+            except Exception:
+                pass
 
 
 async def supervise(args):
+    hub = resolve_hub(args.hub)
+    token = resolve_token()
     while True:
         try:
-            await relay_once(args.host, args.port, args.name, args.scan_timeout,
+            await relay_once(hub, token, args.name, args.scan_timeout,
                              not args.no_pair, args.pair_timeout)
         except Exception as e:
             logging.info("relay error: %s", e)
@@ -135,7 +179,8 @@ async def supervise(args):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--hub", default="127.0.0.1:8790")
+    ap.add_argument("--hub", default=None,
+                    help="hub base URL (default: config hub or http://127.0.0.1:8787)")
     ap.add_argument("--name", default="Claude")
     ap.add_argument("--scan-timeout", type=float, default=15.0)
     ap.add_argument("--no-pair", action="store_true")
@@ -144,8 +189,6 @@ def main(argv=None):
     ap.add_argument("--retry", type=float, default=5.0)
     ap.add_argument("--console", action="store_true")
     args = ap.parse_args(argv)
-    args.host, _, port = args.hub.partition(":")
-    args.port = int(port or 8790)
 
     try:
         import bleak  # noqa: F401
@@ -159,7 +202,7 @@ def main(argv=None):
     if not single_instance():
         logging.info("another relay instance already running (lock %d held); exiting", LOCK_PORT)
         return
-    logging.info("relay starting (hub %s:%d)", args.host, args.port)
+    logging.info("relay starting (hub %s)", resolve_hub(args.hub))
     try:
         asyncio.run(supervise(args))
     except KeyboardInterrupt:

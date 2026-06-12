@@ -27,3 +27,22 @@ def test_register_windows_writes_startup_cmd(tmp_path, monkeypatch):
     monkeypatch.setattr(services, "_startup_dir", lambda: tmp_path)
     services.register("buddyhub", "pythonw -m buddybridge.hub", "Buddy Hub")
     assert (tmp_path / "buddyhub.cmd").read_text().count("buddybridge.hub") == 1
+
+
+def test_launchd_plist_has_label_and_program():
+    p = services.launchd_plist("com.claudebuddy.buddyhub",
+                               "/usr/bin/python3 -m buddybridge.hub --port 8787")
+    assert "<string>com.claudebuddy.buddyhub</string>" in p
+    assert "buddybridge.hub" in p and "<key>RunAtLoad</key>" in p
+    assert "<key>KeepAlive</key>" in p
+
+
+def test_register_macos_writes_plist_and_loads(tmp_path, monkeypatch):
+    monkeypatch.setattr(services.sys, "platform", "darwin")
+    monkeypatch.setattr(services, "_launchd_dir", lambda: tmp_path)
+    calls = []
+    monkeypatch.setattr(services, "_run", lambda cmd: calls.append(cmd))
+    services.register("buddyhub", "python3 -m buddybridge.hub", "Buddy Hub")
+    plist = (tmp_path / "com.claudebuddy.buddyhub.plist")
+    assert plist.exists() and "buddybridge.hub" in plist.read_text()
+    assert any("bootstrap" in c or "load" in c for c in (" ".join(map(str, x)) for x in calls))
