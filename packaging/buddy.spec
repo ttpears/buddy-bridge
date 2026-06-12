@@ -7,16 +7,22 @@
 # Onedir (not onefile) so `buddy.exe hook` starts fast: the hook fires on every
 # tool call and onefile would re-extract the bundle each run.
 import os
+from PyInstaller.utils.hooks import collect_all
 
 root = os.path.dirname(SPECPATH)            # repo root (this spec lives in packaging/)
+
+# Pull in bleak + its Windows WinRT backend (for the BLE relay). collect_all plus
+# the bundled pyinstaller-hooks-contrib bleak hook handle the native winrt bits.
+ble_datas, ble_binaries, ble_hidden = collect_all("bleak")
 
 a = Analysis(
     [os.path.join(root, "buddybridge", "winapp.py")],
     pathex=[root],
-    binaries=[],
-    datas=[],
+    binaries=ble_binaries,
+    datas=ble_datas,
     # lazy/platform imports PyInstaller may miss by static analysis
-    hiddenimports=["tkinter", "pystray._win32", "PIL._tkinter_finder"],
+    hiddenimports=["tkinter", "pystray._win32", "PIL._tkinter_finder",
+                   "bleak", "bleak.backends.winrt"] + ble_hidden,
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
