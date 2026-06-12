@@ -1,0 +1,49 @@
+# buddy-bridge hub for an EXISTING Traefik — just the hub, joined to Traefik's
+# external network. Use this when you already run Traefik; for an all-in-one
+# stack that brings its own Traefik + Let's Encrypt, use docker-compose.yml.
+#
+# The hub is not published to the host — only Traefik reaches it over the shared
+# network — and it refuses to start without a BUDDY_TOKEN, so it's always
+# token-gated on every route.
+#
+# Quick start:
+#   cp .env.example .env      # set HUB_DOMAIN, BUDDY_TOKEN, and TRAEFIK_NETWORK
+#   docker compose -f docker-compose.existing-traefik.yml up -d
+#
+# TLS: `tls=true` uses Traefik's default certificate (e.g. a mounted wildcard).
+# If your Traefik issues certs via ACME instead, add a certresolver label:
+#   - traefik.http.routers.buddyhub.tls.certresolver=<your-resolver>
+
+services:
+  buddyhub:
+    image: python:3.12-slim
+    restart: unless-stopped
+    # Installs from GitHub's source tarball — the slim image has no `git`, so the
+    # git+https form fails. Pin BUDDY_REF to a release tag for a reproducible deploy.
+    command:
+      - sh
+      - -c
+      - >-
+        pip install --no-cache-dir
+        "buddy-bridge @ https://github.com/ttpears/buddy-bridge/archive/${BUDDY_REF:-main}.tar.gz"
+        && exec buddyhub --bind 0.0.0.0 --port 8787 --transport relay --owner "${HUB_OWNER:-there}"
+    environment:
+      # Empty/unset would disable auth — fail closed instead of exposing an open hub.
+      BUDDY_TOKEN: ${BUDDY_TOKEN:?set a strong BUDDY_TOKEN in .env (openssl rand -hex 32)}
+      PYTHONUNBUFFERED: "1"   # stream hub logs to `docker logs` immediately
+    expose:
+      - "8787"
+    networks:
+      - traefik
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_NETWORK:-proxy}
+      - traefik.http.routers.buddyhub.rule=Host(`${HUB_DOMAIN:?set HUB_DOMAIN in .env}`)
+      - traefik.http.routers.buddyhub.entrypoints=websecure
+      - traefik.http.routers.buddyhub.tls=true
+      - traefik.http.services.buddyhub.loadbalancer.server.port=8787
+
+networks:
+  traefik:
+    name: ${TRAEFIK_NETWORK:-proxy}
+    external: true

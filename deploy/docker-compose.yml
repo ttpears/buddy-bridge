@@ -9,9 +9,8 @@
 #   cp .env.example .env      # then set HUB_DOMAIN, ACME_EMAIL, BUDDY_TOKEN
 #   docker compose up -d
 #
-# Already running Traefik? Delete the `traefik` service below and keep
-# `buddyhub`; its labels attach to your existing Traefik as long as they share
-# a network. Adjust the certresolver name to yours.
+# Already running Traefik? Use docker-compose.existing-traefik.yml instead — it's
+# just the buddyhub service, joined to your Traefik's external network.
 
 services:
   traefik:
@@ -39,17 +38,19 @@ services:
   buddyhub:
     image: python:3.12-slim
     restart: unless-stopped
-    # Pin BUDDY_REF to a release tag (e.g. v0.1.0) for a reproducible deploy.
+    # Installs from GitHub's source tarball — the slim image has no `git`, so the
+    # git+https form fails. Pin BUDDY_REF to a release tag for a reproducible deploy.
     command:
       - sh
       - -c
       - >-
         pip install --no-cache-dir
-        "buddy-bridge @ git+https://github.com/ttpears/buddy-bridge@${BUDDY_REF:-main}"
+        "buddy-bridge @ https://github.com/ttpears/buddy-bridge/archive/${BUDDY_REF:-main}.tar.gz"
         && exec buddyhub --bind 0.0.0.0 --port 8787 --transport relay --owner "${HUB_OWNER:-there}"
     environment:
       # Empty/unset would disable auth — fail closed instead of exposing an open hub.
       BUDDY_TOKEN: ${BUDDY_TOKEN:?set a strong BUDDY_TOKEN in .env (openssl rand -hex 32)}
+      PYTHONUNBUFFERED: "1"   # stream hub logs to `docker logs` immediately
     expose:
       - "8787"
     networks:

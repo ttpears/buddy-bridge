@@ -179,9 +179,16 @@ published to the host** — only Traefik reaches it, over the internal network.
    `/relay/stream`). Open the dashboard at
    `https://buddy.<you>.<co>.<tld>/?token=YOUR_TOKEN`.
 
-**Already running Traefik?** Delete the `traefik` service from the compose and
-keep `buddyhub` — its labels attach to your existing Traefik as long as they
-share a network; adjust the `certresolver` name to yours.
+**Already running Traefik?** Use
+[`deploy/docker-compose.existing-traefik.yml`](deploy/docker-compose.existing-traefik.yml)
+instead — it's just the hub, joined to your Traefik's external network (set
+`TRAEFIK_NETWORK` in `.env`). It uses `tls=true` (Traefik's default cert, e.g. a
+mounted wildcard); if your Traefik issues certs via ACME, add a
+`traefik.http.routers.buddyhub.tls.certresolver=<name>` label.
+
+```bash
+docker compose -f docker-compose.existing-traefik.yml up -d
+```
 
 For LAN or Tailscale (no public exposure) you don't need any of this — just point
 clients at the bare hub:
