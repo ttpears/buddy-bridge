@@ -3,14 +3,17 @@ package com.claudebuddy.bridge.service
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Notification
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import com.claudebuddy.bridge.BuddyApp
 import com.claudebuddy.bridge.MainActivity
@@ -26,6 +29,8 @@ class BuddyService : Service() {
     companion object {
         private const val TAG = "BuddyService"
         private const val NOTIF_ID = 1
+        private const val LOW_BATTERY_PCT = 10
+        private const val BATTERY_NOTIF_ID = 2
     }
 
     inner class LocalBinder : Binder() {
@@ -42,6 +47,8 @@ class BuddyService : Service() {
     private var bleManager: BleManager? = null
     private var httpServer: BuddyHttpServer? = null
     private val dedup = HeartbeatDedup()
+    private var wifiLock: WifiManager.WifiLock? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     // Owner name — set from UI settings
     var ownerName: String = ""
@@ -60,6 +67,14 @@ class BuddyService : Service() {
 
     private val _httpRunning = MutableStateFlow(false)
     val httpRunning: StateFlow<Boolean> = _httpRunning
+
+    private val _deviceBattery = MutableStateFlow(-1)  // -1 = unknown
+    val deviceBattery: StateFlow<Int> = _deviceBattery
+    private val _deviceCharging = MutableStateFlow(false)
+    val deviceCharging: StateFlow<Boolean> = _deviceCharging
+    private val _deviceRemMin = MutableStateFlow(-1)   // -1 = unknown
+    val deviceRemMin: StateFlow<Int> = _deviceRemMin
+    private var lowBatteryNotified = false
 
     val bleState get() = bleManager?.state
     val bleDeviceName get() = bleManager?.deviceName
@@ -111,8 +126,24 @@ class BuddyService : Service() {
         return START_STICKY
     }
 
+    @SuppressLint("WakelockTimeout")
     private fun startBridge() {
         if (bleManager != null) return  // already running
+
+        // Keep WiFi radio alive so the HTTP server stays reachable from the
+        // desktop. Without this, Android sleeps WiFi when the screen is off
+        // and Claude Code's hook POSTs fail silently — sessions get reaped.
+        try {
+            val wm = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+            wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "BuddyBridge::HTTP")
+                .apply { acquire() }
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BuddyBridge::Service")
+                .apply { acquire() }
+            Log.i(TAG, "WiFi lock and wake lock acquired")
+        } catch (e: Exception) {
+            Log.w(TAG, "failed to acquire locks: ${e.message}")
+        }
 
         // Create BLE manager — incoming lines resolve prompts
         val ble = BleManager(
@@ -195,6 +226,21 @@ class BuddyService : Service() {
     private fun handleDeviceLine(line: String) {
         try {
             val json = JSONObject(line)
+            if (json.has("battery")) {
+                val pct = json.optInt("battery", -1)
+                val charging = json.optBoolean("charging", false)
+                val remMin = json.optInt("remMin", -1)
+                _deviceBattery.value = pct
+                _deviceCharging.value = charging
+                _deviceRemMin.value = remMin
+                if (pct in 0..LOW_BATTERY_PCT && !charging && !lowBatteryNotified) {
+                    lowBatteryNotified = true
+                    sendLowBatteryNotification(pct)
+                } else if (pct > LOW_BATTERY_PCT || charging) {
+                    lowBatteryNotified = false
+                }
+                return
+            }
             if (json.optString("cmd") == "permission") {
                 val pid = json.optString("id", "")
                 val decision = json.optString("decision", "deny")
@@ -213,6 +259,22 @@ class BuddyService : Service() {
         }
     }
 
+    private fun sendLowBatteryNotification(pct: Int) {
+        val intent = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = Notification.Builder(this, BuddyApp.CHANNEL_ID)
+            .setContentTitle("Buddy Battery Low")
+            .setContentText("Claude Buddy is at $pct% battery")
+            .setSmallIcon(android.R.drawable.stat_notify_error)
+            .setContentIntent(intent)
+            .setAutoCancel(true)
+            .build()
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.notify(BATTERY_NOTIF_ID, notification)
+        Log.i(TAG, "low battery notification: $pct%")
+    }
+
     override fun onDestroy() {
         relayClient?.stop(); relayClient = null
         bleManager?.stop()
@@ -222,6 +284,10 @@ class BuddyService : Service() {
         hub = null
         bleManager = null
         httpServer = null
+        try { wifiLock?.release() } catch (_: Exception) {}
+        try { wakeLock?.release() } catch (_: Exception) {}
+        wifiLock = null
+        wakeLock = null
         Log.i(TAG, "bridge stopped")
         super.onDestroy()
     }

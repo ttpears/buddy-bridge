@@ -7,6 +7,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Calendar
 
 /**
  * Session state aggregator and heartbeat builder.
@@ -25,6 +26,13 @@ class Hub(private val onHeartbeat: (JSONObject) -> Unit) {
     }
 
     private val lock = Mutex()
+
+    // Daily token tracking: accumulates tokens across all sessions,
+    // resets at midnight. Each session's last-seen token count is tracked
+    // so we only add the delta when a session reports a new total.
+    private var tokensToday: Long = 0
+    private var tokenDay: Int = Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
+    private val sessionTokenSnapshot = mutableMapOf<Pair<String, String>, Int>()
 
     // sessions: key = Pair(machine, session) -> mutable state map
     private val sessions = mutableMapOf<Pair<String, String>, MutableMap<String, Any>>()
@@ -53,6 +61,7 @@ class Hub(private val onHeartbeat: (JSONObject) -> Unit) {
                 }
                 "session_end" -> {
                     sessions.remove(key)
+                    sessionTokenSnapshot.remove(key)
                     // Purge entries from this machine
                     val prefix = "$machine >"
                     val filtered = entries.filter { !it.startsWith(prefix) }
@@ -73,6 +82,12 @@ class Hub(private val onHeartbeat: (JSONObject) -> Unit) {
                     }
                     if (tokens != null) {
                         s["tokens"] = tokens
+                        // Accumulate delta into daily total
+                        val prev = sessionTokenSnapshot[key] ?: 0
+                        if (tokens > prev) {
+                            tokensToday += (tokens - prev)
+                        }
+                        sessionTokenSnapshot[key] = tokens
                     }
                 }
             }
@@ -93,6 +108,7 @@ class Hub(private val onHeartbeat: (JSONObject) -> Unit) {
                 mutableMapOf("status" to "idle", "msg" to "", "ts" to nowMs(), "tokens" to 0)
             }
             s["status"] = "waiting"
+            s["ts"] = nowMs()  // keep session alive while waiting for approval
         }
         dirty.trySend(Unit)
         return p.id
@@ -122,7 +138,10 @@ class Hub(private val onHeartbeat: (JSONObject) -> Unit) {
             pending.remove(p)
             if (current === p) current = null
             val s = sessions[p.machine to p.session]
-            if (s != null && s["status"] == "waiting") s["status"] = "idle"
+            if (s != null && s["status"] == "waiting") {
+                s["status"] = "idle"
+                s["ts"] = nowMs()  // reset stale clock after approval
+            }
             p.event.complete(Unit)
         }
         dirty.trySend(Unit)
@@ -138,75 +157,107 @@ class Hub(private val onHeartbeat: (JSONObject) -> Unit) {
 
     // ---- heartbeat --------------------------------------------------------- //
 
-    suspend fun buildHeartbeat(): JSONObject = lock.withLock {
-        val now = nowMs()
+    suspend fun buildHeartbeat(): JSONObject {
+        // Snapshot state under the lock, then build JSON outside it.
+        // Keeps lock hold time short so /event POSTs don't contend.
+        data class Snapshot(
+            val total: Int, val running: Int, val waiting: Int,
+            val tokens: Int, val tokToday: Long, val msg: String,
+            val entriesCopy: List<String>,
+            val promptId: String?, val promptTool: String?, val promptHint: String?
+        )
 
-        // Reap stale sessions (running sessions get a longer timeout)
-        val reaped = mutableSetOf<String>()
-        val staleKeys = sessions.filter { (_, s) ->
-            val limit = if (s["status"] == "running") STALE_RUNNING_SEC else STALE_SESSION_SEC
-            now - (s["ts"] as Long) > limit * 1000
-        }.keys.toList()
-        for (k in staleKeys) {
-            reaped.add(k.first)
-            sessions.remove(k)
-        }
-        if (reaped.isNotEmpty()) {
-            val filtered = entries.filter { e ->
-                reaped.none { m -> e.startsWith("$m >") }
+        val snap = lock.withLock {
+            val now = nowMs()
+
+            // Reap stale sessions
+            val reaped = mutableSetOf<String>()
+            val staleKeys = sessions.filter { (_, s) ->
+                val status = s["status"]
+                val limit = if (status == "running" || status == "waiting") STALE_RUNNING_SEC else STALE_SESSION_SEC
+                now - (s["ts"] as Long) > limit * 1000
+            }.keys.toList()
+            for (k in staleKeys) {
+                reaped.add(k.first)
+                sessions.remove(k)
+                sessionTokenSnapshot.remove(k)
             }
-            entries.clear()
-            filtered.forEach { entries.addLast(it) }
+            if (reaped.isNotEmpty()) {
+                val filtered = entries.filter { e ->
+                    reaped.none { m -> e.startsWith("$m >") }
+                }
+                entries.clear()
+                filtered.forEach { entries.addLast(it) }
+            }
+
+            // Reap orphaned prompts
+            val stalePrompts = byId.filter { (_, p) ->
+                now - p.createdMs > PROMPT_TTL_SEC * 1000
+            }.keys.toList()
+            for (pid in stalePrompts) {
+                val p = byId.remove(pid)
+                if (p != null) {
+                    pending.remove(p)
+                    p.event.complete(Unit)
+                }
+            }
+
+            current = pending.firstOrNull()
+
+            val total = sessions.size
+            val running = sessions.values.count { it["status"] == "running" }
+            val waiting = pending.size
+            val tokens = sessions.values.sumOf { (it["tokens"] as? Int) ?: 0 }
+
+            // Reset daily counter at midnight. Re-snapshot current session
+            // token counts so sessions spanning midnight don't re-add their
+            // entire cumulative total as today's usage.
+            val today = Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
+            if (today != tokenDay) {
+                tokensToday = 0
+                sessionTokenSnapshot.clear()
+                for ((key, s) in sessions) {
+                    val t = (s["tokens"] as? Int) ?: 0
+                    if (t > 0) sessionTokenSnapshot[key] = t
+                }
+                tokenDay = today
+            }
+
+            val cur = current
+            val msg = if (cur != null) {
+                "approve: ${cur.tool}"
+            } else if (running > 0) {
+                sessions.values
+                    .firstOrNull { it["status"] == "running" && (it["msg"] as String).isNotEmpty() }
+                    ?.get("msg") as? String ?: "working"
+            } else if (total > 0) {
+                "idle"
+            } else {
+                ""
+            }
+
+            Snapshot(total, running, waiting, tokens, tokensToday, msg,
+                entries.toList(),
+                cur?.id, cur?.tool, cur?.hint)
         }
 
-        // Reap orphaned prompts
-        val stalePrompts = byId.filter { (_, p) ->
-            now - p.createdMs > PROMPT_TTL_SEC * 1000
-        }.keys.toList()
-        for (pid in stalePrompts) {
-            val p = byId.remove(pid)
-            if (p != null) {
-                pending.remove(p)
-                p.event.complete(Unit)
+        // Build JSON outside the lock — no contention with /event POSTs
+        return JSONObject().apply {
+            put("total", snap.total)
+            put("running", snap.running)
+            put("waiting", snap.waiting)
+            put("tokens", snap.tokens)
+            put("tokens_today", snap.tokToday)
+            put("entries", JSONArray(snap.entriesCopy))
+            put("msg", snap.msg)
+            if (snap.promptId != null) {
+                put("prompt", JSONObject().apply {
+                    put("id", snap.promptId)
+                    put("tool", snap.promptTool)
+                    put("hint", snap.promptHint)
+                })
             }
         }
-
-        // Pick current prompt (FIFO)
-        current = pending.firstOrNull()
-
-        val total = sessions.size
-        val running = sessions.values.count { it["status"] == "running" }
-        val waiting = pending.size
-        val tokens = sessions.values.sumOf { (it["tokens"] as? Int) ?: 0 }
-
-        val hb = JSONObject().apply {
-            put("total", total)
-            put("running", running)
-            put("waiting", waiting)
-            put("tokens", tokens)
-            put("entries", JSONArray(entries.toList()))
-        }
-
-        val cur = current
-        if (cur != null) {
-            hb.put("msg", "approve: ${cur.tool}")
-            hb.put("prompt", JSONObject().apply {
-                put("id", cur.id)
-                put("tool", cur.tool)
-                put("hint", cur.hint)
-            })
-        } else if (running > 0) {
-            val msg = sessions.values
-                .firstOrNull { it["status"] == "running" && (it["msg"] as String).isNotEmpty() }
-                ?.get("msg") as? String ?: "working"
-            hb.put("msg", msg)
-        } else if (total > 0) {
-            hb.put("msg", "idle")
-        } else {
-            hb.put("msg", "")
-        }
-
-        hb
     }
 
     // ---- driver loop ------------------------------------------------------- //
