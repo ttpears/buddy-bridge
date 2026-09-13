@@ -16,6 +16,11 @@ buddy-bridge speaks the same protocol but sourced from Claude Code hook events
 across any number of machines. **Independent, unofficial — not affiliated with,
 endorsed by, or supported by Anthropic.**
 
+**Failure notes:** [My Bluetooth Approval Button Broke When Nothing Was
+Happening](https://hackyourworld.com/buddy-bridge-bluetooth-idle-stream-reconnect/)
+explains the acknowledged-write fix on Windows, the idle keepalive race, and
+why the HTTP stream can now recover without tearing down a healthy BLE link.
+
 **Contents**
 
 - [Quickstart](#-quickstart)
